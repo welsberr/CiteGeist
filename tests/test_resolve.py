@@ -31,6 +31,22 @@ def test_crossref_message_to_entry_maps_basic_fields():
     assert entry.fields["year"] == "2024"
 
 
+def test_crossref_message_to_entry_handles_missing_author_without_crashing():
+    entry = _crossref_message_to_entry(
+        {
+            "type": "journal-article",
+            "title": ["Avida and digital evolution"],
+            "container-title": ["Artificial Life"],
+            "issued": {"date-parts": [[2003, 1, 1]]},
+            "author": [{"family": "", "given": ""}],
+        }
+    )
+
+    assert entry.citation_key == "crossref2003avida"
+    assert entry.fields["title"] == "Avida and digital evolution"
+    assert entry.fields["year"] == "2003"
+
+
 def test_arxiv_atom_entry_to_bib_maps_basic_fields():
     xml = ET.fromstring(
         """

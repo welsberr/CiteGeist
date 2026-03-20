@@ -362,8 +362,15 @@ def _node_text(node: ET.Element | None) -> str:
 
 
 def _make_resolution_key(author_text: str, year: str, title: str) -> str:
-    first_author = author_text.split(" and ")[0]
-    family_name = first_author.split(",")[0] if "," in first_author else first_author.split()[-1]
+    normalized_author_text = " ".join((author_text or "").split())
+    first_author = normalized_author_text.split(" and ")[0].strip() if normalized_author_text else ""
+    if "," in first_author:
+        family_name = first_author.split(",")[0].strip()
+    elif first_author:
+        author_tokens = first_author.split()
+        family_name = author_tokens[-1] if author_tokens else ""
+    else:
+        family_name = ""
     family_name = "".join(ch for ch in family_name.lower() if ch.isalnum()) or "ref"
     first_word = "".join(ch for ch in title.split()[0].lower() if ch.isalnum()) if title.split() else "untitled"
     return f"{family_name}{year}{first_word}"
