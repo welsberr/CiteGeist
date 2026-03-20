@@ -69,6 +69,39 @@ def test_store_exports_bibtex_from_normalized_rows():
         store.close()
 
 
+def test_store_export_skips_doi_only_stub_by_default():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+
+@article{realentry,
+  author = {Smith, Jane},
+  title = {Real Entry},
+  year = {2024},
+  doi = {10.1000/real}
+}
+"""
+        )
+
+        exported = store.export_bibtex()
+        assert "@article{realentry," in exported
+        assert "@misc{stubdoi," not in exported
+
+        explicit = store.export_bibtex(["stubdoi"])
+        assert "@misc{stubdoi," in explicit
+
+        with_stubs = store.export_bibtex(include_stubs=True)
+        assert "@misc{stubdoi," in with_stubs
+    finally:
+        store.close()
+
+
 def test_store_records_provenance_and_review_status():
     store = BibliographyStore()
     try:

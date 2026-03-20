@@ -74,6 +74,42 @@ def test_cli_ingest_show_search_and_export(tmp_path: Path):
     assert "@article{smith2024graphs," in exported
 
 
+def test_cli_export_skips_stub_entries_by_default_but_can_include_them(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+
+@article{realentry,
+  author = {Smith, Jane},
+  title = {Real Entry},
+  year = {2024},
+  doi = {10.1000/real}
+}
+""",
+        encoding="utf-8",
+    )
+
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    default_export = run_cli(tmp_path, "export")
+    assert default_export.returncode == 0
+    assert "@article{realentry," in default_export.stdout
+    assert "@misc{stubdoi," not in default_export.stdout
+
+    explicit_export = run_cli(tmp_path, "export", "stubdoi")
+    assert explicit_export.returncode == 0
+    assert "@misc{stubdoi," in explicit_export.stdout
+
+    include_export = run_cli(tmp_path, "export", "--include-stubs")
+    assert include_export.returncode == 0
+    assert "@misc{stubdoi," in include_export.stdout
+
+
 def test_cli_provenance_and_status_updates(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(SAMPLE_BIB, encoding="utf-8")
@@ -1138,6 +1174,52 @@ def test_cli_export_topic(tmp_path: Path):
     assert result.returncode == 0
     exported = export_path.read_text(encoding="utf-8")
     assert "@article{seed2024," in exported
+
+
+def test_cli_export_topic_skips_stub_entries_by_default(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        for citation_key in ("stubdoi", "seed2024"):
+            store.add_entry_topic(
+                citation_key,
+                topic_slug="graph-methods",
+                topic_name="Graph Methods",
+                source_label="topic-seed",
+            )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    default_export = run_cli(tmp_path, "export-topic", "graph-methods")
+    assert default_export.returncode == 0
+    assert "@article{seed2024," in default_export.stdout
+    assert "@misc{stubdoi," not in default_export.stdout
+
+    include_export = run_cli(tmp_path, "export-topic", "graph-methods", "--include-stubs")
+    assert include_export.returncode == 0
+    assert "@misc{stubdoi," in include_export.stdout
 
 
 def test_cli_search_can_filter_by_topic(tmp_path: Path):

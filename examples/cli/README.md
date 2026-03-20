@@ -129,6 +129,12 @@ Write BibTeX to a file:
 .venv/bin/python -m citegeist --db library.sqlite3 export --output artificial-life.bib
 ```
 
+Include DOI-only placeholder records in a broad export:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 export --include-stubs --output artificial-life.bib
+```
+
 ## Review And Clean Metadata
 
 Purpose: inspect merge conflicts, apply corrections, and enrich incomplete records.
@@ -391,6 +397,12 @@ Write the topic slice to a file:
 
 ```bash
 .venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life --output artificial-life-topic.bib
+```
+
+Include DOI-only placeholder records in the topic export:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life --include-stubs --output artificial-life-topic.bib
 ```
 
 ### Bootstrap

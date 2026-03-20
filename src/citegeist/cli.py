@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("export", help="Export entries as BibTeX")
     export_parser.add_argument("citation_keys", nargs="*", help="Optional citation keys to export")
     export_parser.add_argument("--output", help="Write BibTeX to a file instead of stdout")
+    export_parser.add_argument(
+        "--include-stubs",
+        action="store_true",
+        help="Include DOI-only placeholder records in broad exports",
+    )
 
     status_parser = subparsers.add_parser("set-status", help="Set the review status for one entry")
     status_parser.add_argument("citation_key", help="Citation key to update")
@@ -494,6 +499,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_topic_parser.add_argument("topic_slug", help="Topic slug to export")
     export_topic_parser.add_argument("--output", help="Write BibTeX to a file instead of stdout")
+    export_topic_parser.add_argument(
+        "--include-stubs",
+        action="store_true",
+        help="Include DOI-only placeholder records in the topic export",
+    )
 
     return parser
 
@@ -511,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "show":
             return _run_show(store, args.citation_key, args.limit, args.provenance, args.conflicts)
         if args.command == "export":
-            return _run_export(store, args.citation_keys, args.output)
+            return _run_export(store, args.citation_keys, args.output, args.include_stubs)
         if args.command == "set-status":
             return _run_set_status(store, args.citation_key, args.review_status)
         if args.command == "resolve-conflicts":
@@ -660,7 +670,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "topic-entries":
             return _run_topic_entries(store, args.topic_slug, args.limit)
         if args.command == "export-topic":
-            return _run_export_topic(store, args.topic_slug, args.output)
+            return _run_export_topic(store, args.topic_slug, args.output, args.include_stubs)
     finally:
         store.close()
 
@@ -715,8 +725,14 @@ def _run_show(
     return 0
 
 
-def _run_export(store: BibliographyStore, citation_keys: list[str], output: str | None) -> int:
-    rendered = store.export_bibtex(citation_keys or None)
+def _run_export(
+    store: BibliographyStore,
+    citation_keys: list[str],
+    output: str | None,
+    include_stubs: bool,
+) -> int:
+    explicit_keys = citation_keys or None
+    rendered = store.export_bibtex(explicit_keys, include_stubs=include_stubs or explicit_keys is not None)
     if output:
         Path(output).write_text(rendered + ("\n" if rendered else ""), encoding="utf-8")
     else:
@@ -1731,13 +1747,13 @@ def _run_topic_entries(store: BibliographyStore, topic_slug: str, limit: int) ->
     return 0
 
 
-def _run_export_topic(store: BibliographyStore, topic_slug: str, output: str | None) -> int:
+def _run_export_topic(store: BibliographyStore, topic_slug: str, output: str | None, include_stubs: bool) -> int:
     topic = store.get_topic(topic_slug)
     if topic is None:
         print(f"Topic not found: {topic_slug}", file=sys.stderr)
         return 1
     citation_keys = [row["citation_key"] for row in store.list_topic_entries(topic_slug, limit=100000)]
-    rendered = store.export_bibtex(citation_keys)
+    rendered = store.export_bibtex(citation_keys, include_stubs=include_stubs)
     if output:
         Path(output).write_text(rendered + ("\n" if rendered else ""), encoding="utf-8")
     else:

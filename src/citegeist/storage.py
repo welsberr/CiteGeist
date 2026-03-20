@@ -1010,7 +1010,10 @@ class BibliographyStore:
             return None
         return render_bibtex([entry])
 
-    def export_bibtex(self, citation_keys: list[str] | None = None) -> str:
+    def export_bibtex(self, citation_keys: list[str] | None = None, include_stubs: bool | None = None) -> str:
+        explicit_keys = citation_keys is not None
+        if include_stubs is None:
+            include_stubs = explicit_keys
         if citation_keys is None:
             rows = self.connection.execute(
                 "SELECT citation_key FROM entries ORDER BY COALESCE(year, ''), citation_key"
@@ -1022,6 +1025,8 @@ class BibliographyStore:
         for citation_key in citation_keys:
             entry = self._load_bib_entry(citation_key)
             if entry is not None:
+                if not include_stubs and self._is_export_stub(entry):
+                    continue
                 entries.append(entry)
         if not entries:
             return ""
@@ -1089,6 +1094,22 @@ class BibliographyStore:
             entry_type=str(row["entry_type"]),
             citation_key=str(row["citation_key"]),
             fields=dict(fields),
+        )
+
+    def _is_export_stub(self, entry: BibEntry) -> bool:
+        title = " ".join(entry.fields.get("title", "").split()).strip().lower()
+        doi = " ".join(entry.fields.get("doi", "").split()).strip()
+        url = " ".join(entry.fields.get("url", "").split()).strip()
+        has_author = bool(" ".join(entry.fields.get("author", "").split()).strip())
+        has_abstract = bool(" ".join(entry.fields.get("abstract", "").split()).strip())
+        has_journal = bool(" ".join(entry.fields.get("journal", "").split()).strip())
+        has_booktitle = bool(" ".join(entry.fields.get("booktitle", "").split()).strip())
+        if not doi:
+            return False
+        if title and not (title.startswith("referenced work ") or title.startswith("untitled")):
+            return False
+        return not any((has_author, has_abstract, has_journal, has_booktitle)) and (
+            not url or url.startswith("https://doi.org/")
         )
 
     def _load_creator_names(self, citation_key: str, role: str) -> list[str]:
