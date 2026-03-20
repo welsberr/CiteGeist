@@ -51,3 +51,19 @@ def test_store_ingests_entries_relations_and_search_text():
         ]
     finally:
         store.close()
+
+
+def test_store_exports_bibtex_from_normalized_rows():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(SAMPLE_BIB)
+
+        exported = store.export_bibtex()
+        parsed = {entry.citation_key: entry for entry in parse_bibtex(exported)}
+
+        assert "@article{smith2024graphs," in exported
+        assert "@inproceedings{miller2023search," in exported
+        assert parsed["smith2024graphs"].fields["author"] == "Smith, Jane and Doe, Alex"
+        assert parsed["smith2024graphs"].fields["references"] == "miller2023search"
+    finally:
+        store.close()

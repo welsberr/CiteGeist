@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import OrderedDict
 from pathlib import Path
 
-from .bibtex import BibEntry, parse_bibtex
+from .bibtex import BibEntry, parse_bibtex, render_bibtex
 
 IDENTIFIER_FIELDS = ("doi", "isbn", "issn", "pmid", "arxiv", "dblp", "oai", "url")
 RELATION_FIELDS = {
@@ -268,6 +269,41 @@ class BibliographyStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def list_entries(self, limit: int = 50) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT citation_key, entry_type, title, year
+            FROM entries
+            ORDER BY COALESCE(year, ''), citation_key
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_entry_bibtex(self, citation_key: str) -> str | None:
+        entry = self._load_bib_entry(citation_key)
+        if entry is None:
+            return None
+        return render_bibtex([entry])
+
+    def export_bibtex(self, citation_keys: list[str] | None = None) -> str:
+        if citation_keys is None:
+            rows = self.connection.execute(
+                "SELECT citation_key FROM entries ORDER BY COALESCE(year, ''), citation_key"
+            ).fetchall()
+            citation_keys = [str(row["citation_key"]) for row in rows]
+
+        chunks: list[str] = []
+        entries: list[BibEntry] = []
+        for citation_key in citation_keys:
+            entry = self._load_bib_entry(citation_key)
+            if entry is not None:
+                entries.append(entry)
+        if not entries:
+            return ""
+        return render_bibtex(entries)
+
     def _detect_fts5(self) -> bool:
         try:
             self.connection.execute("CREATE VIRTUAL TABLE temp.fts_probe USING fts5(content)")
@@ -275,6 +311,76 @@ class BibliographyStore:
             return True
         except sqlite3.OperationalError:
             return False
+
+    def _load_bib_entry(self, citation_key: str) -> BibEntry | None:
+        row = self.connection.execute(
+            """
+            SELECT citation_key, entry_type, title, year, journal, booktitle, publisher,
+                   abstract, keywords, url, doi, isbn, extra_fields_json
+            FROM entries
+            WHERE citation_key = ?
+            """,
+            (citation_key,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        fields: OrderedDict[str, str] = OrderedDict()
+        for role in ("author", "editor"):
+            names = self._load_creator_names(citation_key, role)
+            if names:
+                fields[role] = " and ".join(names)
+
+        for field_name in (
+            "title",
+            "year",
+            "journal",
+            "booktitle",
+            "publisher",
+            "abstract",
+            "keywords",
+            "url",
+            "doi",
+            "isbn",
+        ):
+            value = row[field_name]
+            if value:
+                fields[field_name] = str(value)
+
+        extra_fields = json.loads(row["extra_fields_json"])
+        for field_name in sorted(extra_fields):
+            value = extra_fields[field_name]
+            if value:
+                fields[field_name] = str(value)
+
+        for relation_type, field_name in (
+            ("cites", "references"),
+            ("cited_by", "cited_by"),
+            ("crossref", "crossref"),
+        ):
+            values = self.get_relations(citation_key, relation_type)
+            if values:
+                fields[field_name] = ", ".join(values)
+
+        return BibEntry(
+            entry_type=str(row["entry_type"]),
+            citation_key=str(row["citation_key"]),
+            fields=dict(fields),
+        )
+
+    def _load_creator_names(self, citation_key: str, role: str) -> list[str]:
+        rows = self.connection.execute(
+            """
+            SELECT c.full_name
+            FROM entry_creators ec
+            JOIN entries e ON e.id = ec.entry_id
+            JOIN creators c ON c.id = ec.creator_id
+            WHERE e.citation_key = ? AND ec.role = ?
+            ORDER BY ec.ordinal
+            """,
+            (citation_key, role),
+        ).fetchall()
+        return [str(row["full_name"]) for row in rows]
 
 
 def _split_names(value: str) -> list[str]:
@@ -305,8 +411,4 @@ def _split_relation_values(value: str) -> list[str]:
 
 
 def _entry_to_bibtex(entry: BibEntry) -> str:
-    lines = [f"@{entry.entry_type}{{{entry.citation_key},"]
-    for key, value in entry.fields.items():
-        lines.append(f"  {key} = {{{value}}},")
-    lines.append("}")
-    return "\n".join(lines)
+    return render_bibtex([entry])

@@ -7,6 +7,10 @@ name = "citegeist"
 version = "0.1.0"
 description = "BibTeX-native tooling for bibliography augmentation, citation graphs, and search"
 requires-python = ">=3.10"
+dependencies = ["pybtex==0.25.1"]
+
+[project.scripts]
+citegeist = "citegeist.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -43,11 +43,14 @@ But it is not the right long-term base:
 
 The initial repo includes:
 
-- a lightweight BibTeX parser for structured ingestion;
+- `pybtex`-backed BibTeX parsing and export in a repo-local virtual environment;
 - a SQLite-backed bibliography store;
+- a small CLI for ingest, search, inspection, and export;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
+
+The prioritized execution plan lives in [ROADMAP.md](./ROADMAP.md).
 
 ## Layout
 
@@ -65,7 +68,10 @@ citegeist/
 
 ```bash
 cd citegeist
-PYTHONPATH=src python3 - <<'PY'
+python3 -m virtualenv --always-copy .venv
+.venv/bin/pip install -e .
+.venv/bin/pip install pytest
+PYTHONPATH=src .venv/bin/python - <<'PY'
 from citegeist import BibliographyStore
 
 bib = """
@@ -91,17 +97,26 @@ print(store.get_relations("smith2024graphs"))
 print(store.search_text("semantic"))
 store.close()
 PY
-pytest -q
+.venv/bin/python -m pytest -q
 ```
 
-## Planned Work
+Or use the CLI directly:
 
-- parse references from raw prose, OCR, PDF text, and bibliography sections into draft BibTeX;
-- add modern metadata resolvers for DOI, Crossref, DBLP, arXiv, and similar sources;
-- track provenance and confidence for enriched fields;
-- add graph expansion workflows over `cites` and `cited_by` edges;
-- support acquisition pipelines for open-access theses, dissertations, preprints, and publisher metadata pages;
-- add embeddings or pluggable semantic indexing beyond SQLite FTS.
+```bash
+cd citegeist
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 ingest references.bib
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 search "semantic search"
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 show smith2024graphs
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --output reviewed.bib
+```
+
+## Near-Term Priorities
+
+- provenance tracking and entry review states;
+- plaintext reference extraction into draft BibTeX;
+- metadata resolvers for DOI, Crossref, DBLP, and arXiv.
+
+See [ROADMAP.md](./ROADMAP.md) for the prioritized phase plan and rationale.
 
 ## Naming
 
