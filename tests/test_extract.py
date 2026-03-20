@@ -7,6 +7,18 @@ SAMPLE_REFERENCES = """
 [2] Miller, Sam. 2023. Semantic search for research corpora. Proceedings of the Retrieval Workshop.
 """
 
+APA_AND_BOOK_REFERENCES = """
+Brown, T., & Green, P. (2021). Retrieval methods for scholarly corpora. Journal of Information Retrieval.
+
+Nguyen, An. Research Design for Literature Mapping. Example University Press, 2020.
+"""
+
+WRAPPED_REFERENCES = """
+[1] Taylor, Ann. 2022. Multi-line reference extraction
+for bibliography pipelines. Journal of Parsing Systems.
+[2] Chen, Bo. 2021. Another entry. Proceedings of the Mining Workshop.
+"""
+
 
 def test_extract_references_builds_draft_entries():
     entries = extract_references(SAMPLE_REFERENCES)
@@ -33,3 +45,21 @@ def test_extract_cli_writes_bibtex(tmp_path):
     parsed = {entry.citation_key: entry for entry in parse_bibtex(exported)}
     assert parsed["smith2024graphfirst1"].fields["journal"] == "Journal of Research Systems"
     assert parsed["miller2023semantic2"].fields["booktitle"] == "Proceedings of the Retrieval Workshop"
+
+
+def test_extract_references_supports_apa_and_book_styles():
+    entries = extract_references(APA_AND_BOOK_REFERENCES)
+
+    assert [entry.entry_type for entry in entries] == ["article", "book"]
+    assert entries[0].fields["journal"] == "Journal of Information Retrieval"
+    assert entries[0].fields["author"] == "Brown, T., and Green, P"
+    assert entries[1].fields["publisher"] == "Example University Press"
+    assert entries[1].fields["title"] == "Research Design for Literature Mapping"
+
+
+def test_extract_references_joins_wrapped_reference_lines():
+    entries = extract_references(WRAPPED_REFERENCES)
+
+    assert len(entries) == 2
+    assert entries[0].fields["title"] == "Multi-line reference extraction for bibliography pipelines"
+    assert entries[0].fields["journal"] == "Journal of Parsing Systems"

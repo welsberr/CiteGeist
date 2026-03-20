@@ -1,7 +1,13 @@
 from xml.etree import ElementTree as ET
 
 from citegeist.bibtex import BibEntry
-from citegeist.resolve import MetadataResolver, _arxiv_atom_entry_to_bib, _crossref_message_to_entry, merge_entries
+from citegeist.resolve import (
+    MetadataResolver,
+    _arxiv_atom_entry_to_bib,
+    _crossref_message_to_entry,
+    _openalex_work_to_entry,
+    merge_entries,
+)
 
 
 def test_crossref_message_to_entry_maps_basic_fields():
@@ -83,3 +89,68 @@ def test_resolver_tries_doi_before_dblp():
     )
 
     assert calls == [("doi", "10.1000/example-doi"), ("dblp", "conf/test/Smith24")]
+
+
+def test_openalex_work_to_entry_maps_basic_fields():
+    entry = _openalex_work_to_entry(
+        {
+            "id": "https://openalex.org/W12345",
+            "doi": "https://doi.org/10.1000/example-openalex",
+            "display_name": "OpenAlex Resolved Work",
+            "publication_year": 2022,
+            "type": "article",
+            "authorships": [{"author": {"display_name": "Jane Smith"}}],
+            "primary_location": {"source": {"display_name": "Journal of Open Graphs"}},
+            "abstract_inverted_index": {"OpenAlex": [0], "resolved": [1]},
+        }
+    )
+
+    assert entry.citation_key == "openalexw12345"
+    assert entry.fields["openalex"] == "W12345"
+    assert entry.fields["doi"] == "10.1000/example-openalex"
+    assert entry.fields["journal"] == "Journal of Open Graphs"
+    assert entry.fields["abstract"] == "OpenAlex resolved"
+
+
+def test_resolver_can_resolve_openalex_id():
+    resolver = MetadataResolver()
+    resolver.source_client.get_json = lambda _url: {  # type: ignore[method-assign]
+        "id": "https://openalex.org/W12345",
+        "display_name": "OpenAlex Resolved Work",
+        "publication_year": 2022,
+        "type": "article",
+        "authorships": [{"author": {"display_name": "Jane Smith"}}],
+    }
+
+    resolution = resolver.resolve_openalex("W12345")
+
+    assert resolution is not None
+    assert resolution.source_label == "openalex:id:W12345"
+    assert resolution.entry.fields["openalex"] == "W12345"
+
+
+def test_resolver_falls_back_to_openalex_title_search():
+    resolver = MetadataResolver()
+    resolver.search_openalex = lambda title, limit=5: [  # type: ignore[method-assign]
+        _openalex_work_to_entry(
+            {
+                "id": "https://openalex.org/W12345",
+                "display_name": title,
+                "publication_year": 2022,
+                "type": "article",
+                "authorships": [{"author": {"display_name": "Jane Smith"}}],
+            }
+        )
+    ]
+
+    resolution = resolver.resolve_entry(
+        BibEntry(
+            entry_type="article",
+            citation_key="smith2022openalex",
+            fields={"title": "OpenAlex Resolved Work", "author": "Jane Smith", "year": "2022"},
+        )
+    )
+
+    assert resolution is not None
+    assert resolution.source_label == "openalex:search:OpenAlex Resolved Work"
+    assert resolution.entry.fields["openalex"] == "W12345"

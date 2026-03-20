@@ -47,10 +47,10 @@ The initial repo includes:
 - a SQLite-backed bibliography store;
 - a small CLI for ingest, search, inspection, and export;
 - review-state tracking on entries and per-field ingest provenance;
-- first-pass plaintext reference extraction into draft BibTeX;
-- identifier-first metadata resolution for DOI, DBLP, and arXiv-backed entries;
+- plaintext reference extraction into draft BibTeX for numbered, APA-like, wrapped-line, and simple book-style references;
+- identifier-first metadata resolution for DOI, OpenAlex, DBLP, and arXiv-backed entries, with OpenAlex title-search fallback;
 - local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
-- Crossref-backed graph expansion that materializes draft referenced works and edge provenance;
+- Crossref- and OpenAlex-backed graph expansion that materializes draft related works and edge provenance;
 - a dedicated source-client layer with fixture/cache support for live-source development;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
@@ -119,15 +119,27 @@ PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output dra
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith2024graphs --relation cites --depth 2 --missing-only
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 expand smith2024graphs --source crossref
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 expand smith2024graphs --source openalex --relation cited_by --limit 10
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --output reviewed.bib
 ```
 
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
+Live-source workflow:
+
+```bash
+cd citegeist
+export CITEGEIST_SOURCE_CACHE=.cache/citegeist
+export CITEGEIST_LIVE_TESTS=1
+PYTHONPATH=src .venv/bin/python -m pytest -m live -q
+PYTHONPATH=src .venv/bin/python scripts/live_smoke.py
+```
+
+By default, live tests are skipped. They only run when `CITEGEIST_LIVE_TESTS=1` is set.
+
 ## Near-Term Priorities
 
-- stronger plaintext extraction coverage for more citation styles;
-- richer graph expansion from additional external citation sources.
+- additional resolvers and expansion paths for non-DOI scholarly ecosystems.
 
 See [ROADMAP.md](./ROADMAP.md) for the prioritized phase plan and rationale.
 

@@ -203,3 +203,39 @@ def test_cli_expand_with_mocked_crossref(tmp_path: Path):
         exit_code = main(["--db", str(database), "expand", "seed2024"])
 
     assert exit_code == 0
+
+
+def test_cli_expand_with_mocked_openalex(tmp_path: Path):
+    bib_path = tmp_path / "expand-openalex.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  doi = {10.1000/seed-doi}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.expand import ExpansionResult
+
+    with patch("citegeist.cli.OpenAlexExpander.expand_entry") as mocked_expand:
+        mocked_expand.return_value = [
+            ExpansionResult(
+                source_citation_key="seed2024",
+                discovered_citation_key="openalexw12345",
+                created_entry=True,
+                relation_type="cites",
+                source_label="openalex:cites:WSEED",
+            )
+        ]
+        database = tmp_path / "library.sqlite3"
+        exit_code = main(
+            ["--db", str(database), "expand", "seed2024", "--source", "openalex", "--relation", "cites"]
+        )
+
+    assert exit_code == 0
