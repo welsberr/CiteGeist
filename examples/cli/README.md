@@ -15,7 +15,11 @@ cd citegeist
 export PYTHONPATH=src
 ```
 
-## Global Option
+## Setup
+
+Purpose: point commands at the right database before doing anything else.
+
+### Global Option
 
 Use a non-default database path:
 
@@ -23,7 +27,11 @@ Use a non-default database path:
 .venv/bin/python -m citegeist --db library.sqlite3 topics
 ```
 
-## Ingest
+## Build And Inspect A Library
+
+Purpose: ingest records, search them, inspect them, and export them.
+
+### Ingest
 
 Basic ingest:
 
@@ -49,7 +57,7 @@ Use both ingest options together:
 .venv/bin/python -m citegeist --db library.sqlite3 ingest references.bib --status draft --source-label "manual-import:artificial-life"
 ```
 
-## Search
+### Search
 
 Basic search:
 
@@ -69,7 +77,7 @@ Restrict search to one topic slice:
 .venv/bin/python -m citegeist --db library.sqlite3 search "artificial life" --topic artificial-life
 ```
 
-## Show
+### Show
 
 Show one entry:
 
@@ -101,7 +109,7 @@ Use both:
 .venv/bin/python -m citegeist --db library.sqlite3 show langton1989artificial1 --provenance --conflicts
 ```
 
-## Export
+### Export
 
 Export the whole library:
 
@@ -121,7 +129,11 @@ Write BibTeX to a file:
 .venv/bin/python -m citegeist --db library.sqlite3 export --output artificial-life.bib
 ```
 
-## Entry Review
+## Review And Clean Metadata
+
+Purpose: inspect merge conflicts, apply corrections, and enrich incomplete records.
+
+### Entry Review
 
 Set review status:
 
@@ -147,7 +159,7 @@ Apply the latest proposed conflict value:
 .venv/bin/python -m citegeist --db library.sqlite3 apply-conflict langton1989artificial1 title
 ```
 
-## Extract
+### Extract
 
 Extract draft BibTeX from plaintext:
 
@@ -161,7 +173,7 @@ Write extracted BibTeX to a file:
 .venv/bin/python -m citegeist extract references.txt --output extracted-artificial-life.bib
 ```
 
-## Resolve
+### Resolve
 
 Resolve one or more entries against remote metadata:
 
@@ -169,7 +181,11 @@ Resolve one or more entries against remote metadata:
 .venv/bin/python -m citegeist --db library.sqlite3 resolve langton1989artificial1 bedau2003artificial2
 ```
 
-## Graph Traversal
+## Explore Citation Graphs
+
+Purpose: traverse citation edges, export graph data, and render quick visualizations.
+
+### Graph Traversal
 
 Basic traversal:
 
@@ -219,7 +235,7 @@ Write graph output to a file:
 .venv/bin/python -m citegeist --db library.sqlite3 graph langton1989artificial1 --depth 2 --format dot --output artificial-life.dot
 ```
 
-## Graph Viewer
+### Graph Viewer
 
 Render a standalone HTML page from a `json-graph` export:
 
@@ -233,7 +249,7 @@ Set the HTML page title:
 .venv/bin/python -m citegeist graph-view artificial-life.json --output artificial-life.html --title "Artificial Life Graph"
 ```
 
-## Graph Expansion
+### Graph Expansion
 
 Expand from one or more seed entries:
 
@@ -259,7 +275,11 @@ Limit discoveries per seed:
 .venv/bin/python -m citegeist --db library.sqlite3 expand langton1989artificial1 --source openalex --limit 10
 ```
 
-## Topic Expansion
+## Build A Topic-Centered Bibliography
+
+Purpose: create, expand, inspect, and export a topic slice such as `artificial life`.
+
+### Topic Expansion
 
 Basic topic expansion from stored topic metadata:
 
@@ -303,7 +323,7 @@ Preview without writing:
 .venv/bin/python -m citegeist --db library.sqlite3 expand-topic artificial-life --preview
 ```
 
-## Topic Phrase Storage
+### Topic Phrase Storage
 
 Set a stored topic phrase:
 
@@ -317,45 +337,51 @@ Clear a stored topic phrase:
 .venv/bin/python -m citegeist --db library.sqlite3 set-topic-phrase artificial-life --clear
 ```
 
-## OAI-PMH Harvesting
+### Topic Inspection
 
-Inspect a repository:
-
-```bash
-.venv/bin/python -m citegeist discover-oai https://example.edu/oai
-```
-
-Harvest with default metadata prefix:
+List topics:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai
+.venv/bin/python -m citegeist --db library.sqlite3 topics
 ```
 
-Use an alternate metadata prefix:
+Limit topic rows:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --metadata-prefix mods
+.venv/bin/python -m citegeist --db library.sqlite3 topics --limit 20
 ```
 
-Restrict to a set:
+Filter topics by phrase review status:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --set artificial-life
+.venv/bin/python -m citegeist --db library.sqlite3 topics --phrase-review-status pending
 ```
 
-Harvest a date range:
+List entries for a topic:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --from 2024-01-01 --until 2024-12-31
+.venv/bin/python -m citegeist --db library.sqlite3 topic-entries artificial-life
 ```
 
-Limit harvested records and set review status:
+Limit topic entries:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --limit 10 --status draft
+.venv/bin/python -m citegeist --db library.sqlite3 topic-entries artificial-life --limit 25
 ```
 
-## Bootstrap
+Export one topic slice as BibTeX:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life
+```
+
+Write the topic slice to a file:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life --output artificial-life-topic.bib
+```
+
+### Bootstrap
 
 Seed from a BibTeX file:
 
@@ -416,7 +442,7 @@ Set review status for imported entries:
 .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --topic "artificial life" --status reviewed
 ```
 
-## Batch Bootstrap
+### Batch Bootstrap
 
 Run a JSON batch file:
 
@@ -424,7 +450,7 @@ Run a JSON batch file:
 .venv/bin/python -m citegeist --db library.sqlite3 bootstrap-batch artificial-life.json
 ```
 
-## Topic Phrase Review Workflow
+### Topic Phrase Review Workflow
 
 Apply topic phrases directly:
 
@@ -498,51 +524,53 @@ Write the review template to a file:
 .venv/bin/python -m citegeist --db library.sqlite3 export-topic-phrase-reviews --output topic-phrase-review.json
 ```
 
-## Topic Inspection
+## Harvest External Repositories
 
-List topics:
+Purpose: inspect and harvest OAI-PMH repositories into the library.
 
-```bash
-.venv/bin/python -m citegeist --db library.sqlite3 topics
-```
+### OAI-PMH Harvesting
 
-Limit topic rows:
+Inspect a repository:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 topics --limit 20
+.venv/bin/python -m citegeist discover-oai https://example.edu/oai
 ```
 
-Filter topics by phrase review status:
+Harvest with default metadata prefix:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 topics --phrase-review-status pending
+.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai
 ```
 
-List entries for a topic:
+Use an alternate metadata prefix:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 topic-entries artificial-life
+.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --metadata-prefix mods
 ```
 
-Limit topic entries:
+Restrict to a set:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 topic-entries artificial-life --limit 25
+.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --set artificial-life
 ```
 
-Export one topic slice as BibTeX:
+Harvest a date range:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life
+.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --from 2024-01-01 --until 2024-12-31
 ```
 
-Write the topic slice to a file:
+Limit harvested records and set review status:
 
 ```bash
-.venv/bin/python -m citegeist --db library.sqlite3 export-topic artificial-life --output artificial-life-topic.bib
+.venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --limit 10 --status draft
 ```
 
-## TalkOrigins Example Commands
+## Work Through Example Corpora
+
+Purpose: run the repo’s example workflows without treating them as the core product surface.
+
+### TalkOrigins Example Commands
 
 Scrape the example corpus:
 
