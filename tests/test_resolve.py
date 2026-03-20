@@ -1,4 +1,5 @@
 from xml.etree import ElementTree as ET
+import urllib.error
 
 from citegeist.bibtex import BibEntry, render_bibtex
 from citegeist.resolve import (
@@ -198,6 +199,28 @@ def test_resolver_can_resolve_openalex_id():
     assert resolution is not None
     assert resolution.source_label == "openalex:id:W12345"
     assert resolution.entry.fields["openalex"] == "W12345"
+
+
+def test_resolve_doi_returns_none_on_http_404():
+    resolver = MetadataResolver()
+
+    def raise_404(_url: str):
+        raise urllib.error.HTTPError(_url, 404, "Not Found", hdrs=None, fp=None)
+
+    resolver.source_client.get_json = raise_404  # type: ignore[method-assign]
+
+    assert resolver.resolve_doi("10.1000/missing") is None
+
+
+def test_search_crossref_returns_empty_on_fetch_error():
+    resolver = MetadataResolver()
+
+    def raise_url_error(_url: str):
+        raise urllib.error.URLError("temporary failure")
+
+    resolver.source_client.get_json = raise_url_error  # type: ignore[method-assign]
+
+    assert resolver.search_crossref("Avida") == []
 
 
 def test_resolver_falls_back_to_openalex_title_search():

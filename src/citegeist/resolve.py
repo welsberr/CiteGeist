@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -76,7 +77,9 @@ class MetadataResolver:
 
     def resolve_doi(self, doi: str) -> Resolution | None:
         encoded = urllib.parse.quote(doi, safe="")
-        payload = self.source_client.get_json(f"https://api.crossref.org/works/{encoded}")
+        payload = self._safe_get_json(f"https://api.crossref.org/works/{encoded}")
+        if payload is None:
+            return None
         message = payload.get("message", {})
         if not message:
             return None
@@ -88,7 +91,9 @@ class MetadataResolver:
 
     def search_crossref(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"query.title": title, "rows": limit})
-        payload = self.source_client.get_json(f"https://api.crossref.org/works?{query}")
+        payload = self._safe_get_json(f"https://api.crossref.org/works?{query}")
+        if payload is None:
+            return []
         items = payload.get("message", {}).get("items", [])
         return [_crossref_message_to_entry(item) for item in items]
 
@@ -114,7 +119,9 @@ class MetadataResolver:
 
     def resolve_dblp(self, dblp_key: str) -> Resolution | None:
         encoded_key = urllib.parse.quote(dblp_key, safe="/:")
-        text = self.source_client.get_text(f"https://dblp.org/rec/{encoded_key}.bib")
+        text = self._safe_get_text(f"https://dblp.org/rec/{encoded_key}.bib")
+        if text is None:
+            return None
         entries = parse_bibtex(text)
         if not entries:
             return None
@@ -126,7 +133,9 @@ class MetadataResolver:
 
     def search_dblp(self, query_text: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"q": query_text, "format": "json", "h": limit})
-        payload = self.source_client.get_json(f"https://dblp.org/search/publ/api?{query}")
+        payload = self._safe_get_json(f"https://dblp.org/search/publ/api?{query}")
+        if payload is None:
+            return []
         hits = payload.get("result", {}).get("hits", {}).get("hit", [])
         if isinstance(hits, dict):
             hits = [hits]
@@ -143,7 +152,9 @@ class MetadataResolver:
 
     def resolve_arxiv(self, arxiv_id: str) -> Resolution | None:
         query = urllib.parse.urlencode({"id_list": arxiv_id})
-        root = self.source_client.get_xml(f"https://export.arxiv.org/api/query?{query}")
+        root = self._safe_get_xml(f"https://export.arxiv.org/api/query?{query}")
+        if root is None:
+            return None
         namespace = {"atom": "http://www.w3.org/2005/Atom"}
         entry = root.find("atom:entry", namespace)
         if entry is None:
@@ -156,7 +167,9 @@ class MetadataResolver:
 
     def resolve_openalex(self, openalex_id: str) -> Resolution | None:
         normalized_id = _normalize_openalex_id(openalex_id)
-        payload = self.source_client.get_json(f"https://api.openalex.org/works/{normalized_id}")
+        payload = self._safe_get_json(f"https://api.openalex.org/works/{normalized_id}")
+        if payload is None:
+            return None
         if not payload:
             return None
         return Resolution(
@@ -167,7 +180,9 @@ class MetadataResolver:
 
     def resolve_datacite_doi(self, doi: str) -> Resolution | None:
         encoded = urllib.parse.quote(doi, safe="")
-        payload = self.source_client.get_json(f"https://api.datacite.org/dois/{encoded}")
+        payload = self._safe_get_json(f"https://api.datacite.org/dois/{encoded}")
+        if payload is None:
+            return None
         data = payload.get("data", {})
         if not data:
             return None
@@ -179,7 +194,9 @@ class MetadataResolver:
 
     def search_datacite(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"query": title, "page[size]": limit})
-        payload = self.source_client.get_json(f"https://api.datacite.org/dois?{query}")
+        payload = self._safe_get_json(f"https://api.datacite.org/dois?{query}")
+        if payload is None:
+            return []
         return [_datacite_work_to_entry(item) for item in payload.get("data", [])]
 
     def search_datacite_best_match(
@@ -204,8 +221,28 @@ class MetadataResolver:
 
     def search_openalex(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"search": title, "per-page": limit})
-        payload = self.source_client.get_json(f"https://api.openalex.org/works?{query}")
+        payload = self._safe_get_json(f"https://api.openalex.org/works?{query}")
+        if payload is None:
+            return []
         return [_openalex_work_to_entry(item) for item in payload.get("results", [])]
+
+    def _safe_get_json(self, url: str) -> dict | None:
+        try:
+            return self.source_client.get_json(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+            return None
+
+    def _safe_get_text(self, url: str) -> str | None:
+        try:
+            return self.source_client.get_text(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+            return None
+
+    def _safe_get_xml(self, url: str) -> ET.Element | None:
+        try:
+            return self.source_client.get_xml(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ET.ParseError, ValueError):
+            return None
 
     def search_openalex_best_match(
         self,
