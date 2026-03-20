@@ -60,7 +60,10 @@ The initial repo includes:
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
 
-Example applications live alongside the core package rather than defining it. The current example corpus pipeline is the TalkOrigins bibliography workflow under [`citegeist.examples.talkorigins`](./src/citegeist/examples/talkorigins.py) with a usage guide in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
+Example applications live alongside the core package rather than defining it. Current examples include:
+
+- a topic-only bootstrap workflow for `artificial life` in [examples/artificial-life/README.md](./examples/artificial-life/README.md);
+- the TalkOrigins bibliography pipeline under [`citegeist.examples.talkorigins`](./src/citegeist/examples/talkorigins.py) with a usage guide in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
 
 The prioritized execution plan lives in [ROADMAP.md](./ROADMAP.md).
 
@@ -175,6 +178,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talk
 ```
 
 The older `scrape-talkorigins`-style command names remain available as compatibility aliases. The full example workflow and reconstruction notes live in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
+
+For a smaller example that starts from a topic phrase alone, see [examples/artificial-life/README.md](./examples/artificial-life/README.md).
 
 Correction files are simple JSON:
 
