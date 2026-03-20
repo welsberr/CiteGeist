@@ -159,6 +159,8 @@ Broad BibTeX exports skip DOI-only placeholder records such as `Referenced work 
 
 Long-running CLI commands report progress on `stderr` so `stdout` remains clean for JSON, BibTeX, or tabular output.
 
+Crossref reference expansion is intentionally conservative about weak discoveries. If a cited reference has no DOI and Crossref only exposes it as an unstructured citation blob, `expand --source crossref`, `expand-topic --source crossref`, and bootstrap flows now skip materializing that record unless the fallback metadata looks like a cleaner non-`misc` work such as conference proceedings. This reduces junk `@misc` entries whose `title` field is really a pasted citation string.
+
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
 ## Example Application

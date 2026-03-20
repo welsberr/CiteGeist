@@ -58,6 +58,8 @@ class CrossrefExpander:
         results: list[ExpansionResult] = []
         for index, reference in enumerate(references, start=1):
             discovered = self._reference_to_entry(reference, citation_key, index)
+            if discovered is None:
+                continue
             created = False
             if store.get_entry(discovered.citation_key) is None:
                 store.upsert_entry(
@@ -89,17 +91,22 @@ class CrossrefExpander:
             )
         return results
 
-    def _reference_to_entry(self, reference: dict, source_citation_key: str, ordinal: int) -> BibEntry:
+    def _reference_to_entry(
+        self,
+        reference: dict,
+        source_citation_key: str,
+        ordinal: int,
+    ) -> BibEntry | None:
         fallback = _crossref_reference_to_entry(reference, source_citation_key, ordinal)
         doi = reference.get("DOI") or ""
         if not doi:
-            return fallback
+            return None if _skip_crossref_reference(reference, fallback) else fallback
 
         resolution = self.resolver.resolve_doi(doi)
         if resolution is None:
             resolution = self.resolver.resolve_datacite_doi(doi)
         if resolution is None:
-            return fallback
+            return None if _skip_crossref_reference(reference, fallback) else fallback
 
         merged = merge_entries(resolution.entry, fallback)
         merged.fields["note"] = fallback.fields["note"]
@@ -341,6 +348,8 @@ class TopicExpander:
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for index, reference in enumerate(references, start=1):
             discovered = self.crossref_expander._reference_to_entry(reference, citation_key, index)
+            if discovered is None:
+                continue
             rows.append(
                 (
                     ExpansionResult(
@@ -423,6 +432,44 @@ def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordi
     citation_key = _reference_citation_key(reference, title, year, ordinal)
     entry_type = _crossref_reference_entry_type(reference, title, journal_title)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
+
+
+def _skip_crossref_reference(reference: dict, entry: BibEntry) -> bool:
+    if reference.get("DOI"):
+        return False
+    if reference.get("article-title") or reference.get("volume-title"):
+        return False
+
+    title = str(entry.fields.get("title") or "")
+    normalized_title = _normalize_text(title)
+    if not normalized_title:
+        return True
+    if normalized_title.casefold().startswith("referenced work "):
+        return True
+    if normalized_title[0] in ".,;:)":
+        return True
+
+    unstructured = _normalize_text(str(reference.get("unstructured") or ""))
+    if not unstructured:
+        return not bool(reference.get("journal-title"))
+    if entry.entry_type == "misc":
+        return True
+    return _looks_like_citation_blob(unstructured)
+
+
+def _looks_like_citation_blob(text: str) -> bool:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("http://", "https://", "www.", " accessed ", " url ")):
+        return True
+    if any(token in lowered for token in ("supporting material", "grant", "poll results", "prescribing information")):
+        return True
+    if text.count(",") >= 3 or text.count(";") >= 2:
+        return True
+    if re.search(r"\(\d{4}\)", text):
+        return True
+    if re.search(r"\b[A-Z]\.[ ]?[A-Z]?\.", text):
+        return True
+    return False
 
 
 def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int) -> str:

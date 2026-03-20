@@ -211,6 +211,8 @@ Re-enrich all current `@misc` entries with DOIs:
 .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25
 ```
 
+When Crossref expansion only yields an unstructured citation blob without a DOI, citegeist now skips materializing that discovery instead of storing it as a weak `@misc` entry. Cleaner fallback cases that infer a more specific type, such as proceedings-like titles, are still admitted.
+
 ## Explore Citation Graphs
 
 Purpose: traverse citation edges, export graph data, and render quick visualizations.

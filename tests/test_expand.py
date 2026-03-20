@@ -59,14 +59,11 @@ def test_crossref_expander_creates_draft_nodes_and_relations():
 
         results = expander.expand_entry_references(store, "seed2024")
 
-        assert [result.discovered_citation_key for result in results] == [
-            "doi101000exampleref",
-            "ref2021unstructured2",
-        ]
+        assert [result.discovered_citation_key for result in results] == ["doi101000exampleref"]
         discovered = store.get_entry("doi101000exampleref")
         assert discovered is not None
         assert discovered["review_status"] == "draft"
-        assert store.get_relations("seed2024") == ["doi101000exampleref", "ref2021unstructured2"]
+        assert store.get_relations("seed2024") == ["doi101000exampleref"]
         relation_provenance = store.get_relation_provenance("seed2024")
         assert relation_provenance[0]["source_type"] == "graph_expand"
     finally:
@@ -140,6 +137,78 @@ def test_crossref_reference_to_entry_infers_non_misc_for_proceedings_like_text()
     )
 
     assert entry.entry_type == "inproceedings"
+
+
+def test_crossref_expander_skips_citation_blob_without_identifier():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  doi = {10.1000/seed-doi}
+}
+"""
+        )
+
+        expander = CrossrefExpander()
+        expander.resolver.source_client.get_json = lambda _url: {  # type: ignore[method-assign]
+            "message": {
+                "reference": [
+                    {
+                        "unstructured": (
+                            "Abraham, J.K., Meir, E., Perry, J. (2009). "
+                            "Addressing undergraduate student misconceptions. "
+                            "https://example.org/article"
+                        ),
+                        "year": "2009",
+                    }
+                ]
+            }
+        }
+
+        assert expander.expand_entry_references(store, "seed2024") == []
+        assert store.get_relations("seed2024") == []
+    finally:
+        store.close()
+
+
+def test_crossref_expander_keeps_simple_unstructured_title_without_identifier():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  doi = {10.1000/seed-doi}
+}
+"""
+        )
+
+        expander = CrossrefExpander()
+        expander.resolver.source_client.get_json = lambda _url: {  # type: ignore[method-assign]
+            "message": {
+                "reference": [
+                    {
+                        "unstructured": "Proceedings of the Artificial Life Workshop",
+                        "year": "2005",
+                    }
+                ]
+            }
+        }
+
+        results = expander.expand_entry_references(store, "seed2024")
+
+        assert [result.discovered_citation_key for result in results] == ["ref2005proceedings1"]
+        discovered = store.get_entry("ref2005proceedings1")
+        assert discovered is not None
+        assert discovered["entry_type"] == "inproceedings"
+    finally:
+        store.close()
 
 
 def test_crossref_expander_returns_empty_on_fetch_error():
