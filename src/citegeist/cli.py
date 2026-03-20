@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from html import escape as html_escape
 import json
 import sys
 from pathlib import Path
@@ -82,6 +83,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show only unresolved target nodes that are not yet present in the database",
     )
+    graph_parser.add_argument(
+        "--format",
+        choices=["json", "dot", "json-graph"],
+        default="json",
+        help="Output format for traversed graph results",
+    )
+    graph_parser.add_argument(
+        "--output",
+        help="Write graph output to a file instead of stdout",
+    )
+
+    graph_view_parser = subparsers.add_parser(
+        "graph-view",
+        help="Render a self-contained HTML viewer from a json-graph export",
+    )
+    graph_view_parser.add_argument("input", help="Path to a graph JSON file exported with --format json-graph")
+    graph_view_parser.add_argument("--output", required=True, help="Path to write the HTML viewer")
+    graph_view_parser.add_argument("--title", default="CiteGeist Graph View", help="HTML page title")
 
     expand_parser = subparsers.add_parser("expand", help="Expand graph edges from external metadata sources")
     expand_parser.add_argument("citation_keys", nargs="+", help="Seed citation keys to expand")
@@ -491,7 +510,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.depth,
                 args.review_status,
                 args.missing_only,
+                args.format,
+                args.output,
             )
+        if args.command == "graph-view":
+            return _run_graph_view(Path(args.input), Path(args.output), args.title)
         if args.command == "expand":
             return _run_expand(store, args.citation_keys, args.source, args.relation, args.limit)
         if args.command == "expand-topic":
@@ -763,6 +786,8 @@ def _run_graph(
     depth: int,
     review_status: str | None,
     missing_only: bool,
+    output_format: str,
+    output: str | None,
 ) -> int:
     rows = store.traverse_graph(
         citation_keys,
@@ -773,8 +798,355 @@ def _run_graph(
     )
     if missing_only:
         rows = [row for row in rows if not row["target_exists"]]
-    print(json.dumps(rows, indent=2))
+    rendered: str
+    if output_format == "dot":
+        rendered = _render_graph_dot(store, citation_keys, rows)
+    elif output_format == "json-graph":
+        rendered = json.dumps(_render_graph_json(store, citation_keys, rows), indent=2)
+    else:
+        rendered = json.dumps(rows, indent=2)
+    if output:
+        Path(output).write_text(rendered + ("\n" if rendered and not rendered.endswith("\n") else ""), encoding="utf-8")
+    else:
+        print(rendered)
     return 0
+
+
+def _run_graph_view(input_path: Path, output_path: Path, title: str) -> int:
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("nodes"), list) or not isinstance(payload.get("edges"), list):
+        print("graph-view expects a json-graph payload with 'nodes' and 'edges'", file=sys.stderr)
+        return 1
+    output_path.write_text(_render_graph_html(payload, title), encoding="utf-8")
+    return 0
+
+
+def _render_graph_dot(
+    store: BibliographyStore,
+    seed_keys: list[str],
+    rows: list[dict[str, object]],
+) -> str:
+    node_payloads = _collect_graph_nodes(store, seed_keys, rows)
+
+    lines = ["digraph citegeist {", "  rankdir=LR;"]
+    for citation_key, payload in sorted(node_payloads.items()):
+        attributes = {
+            "label": _graph_node_label(payload),
+            "shape": "doublecircle" if payload.get("is_seed") else "ellipse",
+        }
+        if not payload.get("target_exists"):
+            attributes["style"] = "dashed"
+            attributes["color"] = "gray50"
+        elif payload.get("review_status") == "reviewed":
+            attributes["color"] = "forestgreen"
+        elif payload.get("review_status") == "draft":
+            attributes["color"] = "goldenrod"
+        attr_string = ", ".join(f'{key}="{_dot_escape(str(value))}"' for key, value in attributes.items())
+        lines.append(f'  "{_dot_escape(citation_key)}" [{attr_string}];')
+
+    for row in rows:
+        source_key = _dot_escape(str(row["source_citation_key"]))
+        target_key = _dot_escape(str(row["target_citation_key"]))
+        relation_type = _dot_escape(str(row["relation_type"]))
+        depth_value = _dot_escape(str(row["depth"]))
+        lines.append(
+            f'  "{source_key}" -> "{target_key}" [label="{relation_type} d={depth_value}"];'
+        )
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _render_graph_json(
+    store: BibliographyStore,
+    seed_keys: list[str],
+    rows: list[dict[str, object]],
+) -> dict[str, object]:
+    node_payloads = _collect_graph_nodes(store, seed_keys, rows)
+    nodes = []
+    for citation_key, payload in sorted(node_payloads.items()):
+        nodes.append(
+            {
+                "id": citation_key,
+                "label": citation_key,
+                "title": payload.get("title"),
+                "review_status": payload.get("review_status"),
+                "target_exists": payload.get("target_exists"),
+                "is_seed": payload.get("is_seed"),
+            }
+        )
+    edges = []
+    for index, row in enumerate(rows, start=1):
+        edges.append(
+            {
+                "id": f"edge-{index}",
+                "source": str(row["source_citation_key"]),
+                "target": str(row["target_citation_key"]),
+                "relation_type": str(row["relation_type"]),
+                "depth": int(row["depth"]),
+                "target_exists": bool(row["target_exists"]),
+            }
+        )
+    return {"nodes": nodes, "edges": edges}
+
+
+def _render_graph_html(payload: dict[str, object], title: str) -> str:
+    graph_json = json.dumps(payload)
+    safe_title = html_escape(title)
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <style>
+    :root {{
+      --bg: #f4f0e8;
+      --panel: rgba(255, 255, 255, 0.82);
+      --text: #1e1c18;
+      --muted: #6e675c;
+      --edge: #948b80;
+      --seed: #9e3b2f;
+      --reviewed: #2f6b3d;
+      --draft: #b07d18;
+      --missing: #8f8a83;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, #efe4d2, transparent 30%),
+        radial-gradient(circle at bottom right, #ddd4c6, transparent 28%),
+        var(--bg);
+    }}
+    .shell {{
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 100vh;
+    }}
+    .sidebar {{
+      padding: 1.25rem;
+      border-right: 1px solid rgba(0, 0, 0, 0.08);
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+    }}
+    .sidebar h1 {{
+      margin: 0 0 0.5rem 0;
+      font-size: 1.25rem;
+    }}
+    .sidebar p {{
+      margin: 0 0 1rem 0;
+      color: var(--muted);
+      line-height: 1.4;
+    }}
+    .legend {{
+      display: grid;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }}
+    .legend-item {{
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem;
+    }}
+    .swatch {{
+      width: 0.85rem;
+      height: 0.85rem;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+    }}
+    .viewer {{
+      position: relative;
+      overflow: hidden;
+    }}
+    svg {{
+      width: 100%;
+      height: 100vh;
+      display: block;
+    }}
+    .edge {{
+      stroke: var(--edge);
+      stroke-width: 1.5;
+      opacity: 0.8;
+    }}
+    .node {{
+      stroke: rgba(0, 0, 0, 0.2);
+      stroke-width: 1.5;
+    }}
+    .label {{
+      font-size: 12px;
+      fill: var(--text);
+      pointer-events: none;
+    }}
+    .meta {{
+      font-size: 0.92rem;
+      color: var(--muted);
+      margin-top: 1rem;
+      display: grid;
+      gap: 0.35rem;
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <h1>{title}</h1>
+      <p>Offline graph viewer for CiteGeist <code>json-graph</code> exports.</p>
+      <div class="meta">
+        <div id="node-count"></div>
+        <div id="edge-count"></div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><span class="swatch" style="background: var(--seed)"></span>Seed node</div>
+        <div class="legend-item"><span class="swatch" style="background: var(--reviewed)"></span>Reviewed node</div>
+        <div class="legend-item"><span class="swatch" style="background: var(--draft)"></span>Draft node</div>
+        <div class="legend-item"><span class="swatch" style="background: var(--missing)"></span>Missing node</div>
+      </div>
+      <div class="meta">
+        <div>Tip: zoom in the browser and use the exported JSON for Cytoscape or D3 if you need richer interaction.</div>
+      </div>
+    </aside>
+    <main class="viewer">
+      <svg viewBox="0 0 1200 900" role="img" aria-label="Citation graph">
+        <g id="edges"></g>
+        <g id="nodes"></g>
+        <g id="labels"></g>
+      </svg>
+    </main>
+  </div>
+  <script>
+    const graph = {graph_json};
+    const width = 1200;
+    const height = 900;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const radius = Math.max(180, Math.min(width, height) * 0.34);
+    const nodes = [...graph.nodes].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const edges = graph.edges;
+    const byId = new Map();
+
+    nodes.forEach((node, index) => {{
+      const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1) - Math.PI / 2;
+      const x = centerX + Math.cos(angle) * radius;
+      const y = centerY + Math.sin(angle) * radius;
+      const enriched = {{ ...node, x, y }};
+      byId.set(node.id, enriched);
+    }});
+
+    document.getElementById("node-count").textContent = `${{nodes.length}} nodes`;
+    document.getElementById("edge-count").textContent = `${{edges.length}} edges`;
+
+    const edgeLayer = document.getElementById("edges");
+    const nodeLayer = document.getElementById("nodes");
+    const labelLayer = document.getElementById("labels");
+
+    function nodeColor(node) {{
+      if (!node.target_exists) return "var(--missing)";
+      if (node.is_seed) return "var(--seed)";
+      if (node.review_status === "reviewed") return "var(--reviewed)";
+      return "var(--draft)";
+    }}
+
+    edges.forEach((edge) => {{
+      const source = byId.get(edge.source);
+      const target = byId.get(edge.target);
+      if (!source || !target) return;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("class", "edge");
+      line.setAttribute("x1", source.x);
+      line.setAttribute("y1", source.y);
+      line.setAttribute("x2", target.x);
+      line.setAttribute("y2", target.y);
+      line.setAttribute("data-relation", edge.relation_type);
+      edgeLayer.appendChild(line);
+    }});
+
+    [...byId.values()].forEach((node) => {{
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("class", "node");
+      circle.setAttribute("cx", node.x);
+      circle.setAttribute("cy", node.y);
+      circle.setAttribute("r", node.is_seed ? 11 : 9);
+      circle.setAttribute("fill", nodeColor(node));
+      circle.setAttribute("data-title", node.title || "");
+      nodeLayer.appendChild(circle);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("class", "label");
+      label.setAttribute("x", node.x + 14);
+      label.setAttribute("y", node.y + 4);
+      label.textContent = node.title ? `${{node.id}}: ${{node.title}}` : node.id;
+      labelLayer.appendChild(label);
+    }});
+  </script>
+</body>
+</html>
+""".format(title=safe_title, graph_json=graph_json)
+
+
+def _collect_graph_nodes(
+    store: BibliographyStore,
+    seed_keys: list[str],
+    rows: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    node_payloads: dict[str, dict[str, object]] = {}
+    entry_cache: dict[str, dict[str, object] | None] = {}
+
+    def get_entry(citation_key: str) -> dict[str, object] | None:
+        if citation_key not in entry_cache:
+            entry_cache[citation_key] = store.get_entry(citation_key)
+        return entry_cache[citation_key]
+
+    for seed_key in seed_keys:
+        entry = get_entry(seed_key)
+        node_payloads[seed_key] = {
+            "citation_key": seed_key,
+            "title": entry.get("title") if entry else None,
+            "review_status": entry.get("review_status") if entry else None,
+            "target_exists": entry is not None,
+            "is_seed": True,
+        }
+
+    for row in rows:
+        source_key = str(row["source_citation_key"])
+        target_key = str(row["target_citation_key"])
+        source_entry = get_entry(source_key)
+        node_payloads.setdefault(
+            source_key,
+            {
+                "citation_key": source_key,
+                "title": source_entry.get("title") if source_entry else None,
+                "review_status": source_entry.get("review_status") if source_entry else None,
+                "target_exists": source_entry is not None,
+                "is_seed": source_key in seed_keys,
+            },
+        )
+        node_payloads[target_key] = {
+            "citation_key": target_key,
+            "title": row.get("target_title"),
+            "review_status": row.get("target_review_status"),
+            "target_exists": bool(row.get("target_exists")),
+            "is_seed": target_key in seed_keys,
+        }
+    return node_payloads
+
+
+def _graph_node_label(payload: dict[str, object]) -> str:
+    citation_key = str(payload.get("citation_key") or "")
+    title = str(payload.get("title") or "").strip()
+    review_status = str(payload.get("review_status") or "").strip()
+    parts = [citation_key]
+    if title:
+        parts.append(title)
+    if review_status:
+        parts.append(f"[{review_status}]")
+    return "\\n".join(parts)
+
+
+def _dot_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _run_expand(

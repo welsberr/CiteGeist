@@ -1144,6 +1144,190 @@ def test_cli_graph_outputs_missing_targets(tmp_path: Path):
     assert payload[0]["target_exists"] is False
 
 
+def test_cli_graph_can_render_dot_output(tmp_path: Path):
+    bib_path = tmp_path / "graph.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  references = {known2023, missing2022}
+}
+
+@article{known2023,
+  author = {Known, Bob},
+  title = {Known Paper},
+  year = {2023}
+}
+""",
+        encoding="utf-8",
+    )
+
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    graph = run_cli(tmp_path, "graph", "seed2024", "--format", "dot")
+    assert graph.returncode == 0
+    assert "digraph citegeist {" in graph.stdout
+    assert '"seed2024" [label="seed2024\\\\nSeed Paper\\\\n[draft]"' in graph.stdout
+    assert '"seed2024" -> "known2023" [label="cites d=1"]' in graph.stdout
+    assert '"seed2024" -> "missing2022" [label="cites d=1"]' in graph.stdout
+
+
+def test_cli_graph_can_write_dot_output_to_file(tmp_path: Path):
+    bib_path = tmp_path / "graph.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  references = {known2023}
+}
+
+@article{known2023,
+  author = {Known, Bob},
+  title = {Known Paper},
+  year = {2023}
+}
+""",
+        encoding="utf-8",
+    )
+
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    output_path = tmp_path / "graph.dot"
+    graph = run_cli(tmp_path, "graph", "seed2024", "--format", "dot", "--output", str(output_path))
+    assert graph.returncode == 0
+    assert graph.stdout == ""
+    rendered = output_path.read_text(encoding="utf-8")
+    assert "digraph citegeist {" in rendered
+    assert '"seed2024" -> "known2023" [label="cites d=1"]' in rendered
+
+
+def test_cli_graph_can_render_json_graph_output(tmp_path: Path):
+    bib_path = tmp_path / "graph.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  references = {known2023, missing2022}
+}
+
+@article{known2023,
+  author = {Known, Bob},
+  title = {Known Paper},
+  year = {2023}
+}
+""",
+        encoding="utf-8",
+    )
+
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    graph = run_cli(tmp_path, "graph", "seed2024", "--format", "json-graph")
+    assert graph.returncode == 0
+    payload = json.loads(graph.stdout)
+    assert [node["id"] for node in payload["nodes"]] == ["known2023", "missing2022", "seed2024"]
+    assert payload["nodes"][2]["is_seed"] is True
+    assert payload["edges"][0]["source"] == "seed2024"
+    assert payload["edges"][0]["target"] == "known2023"
+    assert payload["edges"][1]["target_exists"] is False
+
+
+def test_cli_graph_can_write_json_graph_output_to_file(tmp_path: Path):
+    bib_path = tmp_path / "graph.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  references = {known2023}
+}
+
+@article{known2023,
+  author = {Known, Bob},
+  title = {Known Paper},
+  year = {2023}
+}
+""",
+        encoding="utf-8",
+    )
+
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    output_path = tmp_path / "graph.json"
+    graph = run_cli(tmp_path, "graph", "seed2024", "--format", "json-graph", "--output", str(output_path))
+    assert graph.returncode == 0
+    assert graph.stdout == ""
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [edge["target"] for edge in payload["edges"]] == ["known2023"]
+
+
+def test_cli_graph_view_renders_html_from_json_graph(tmp_path: Path):
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(
+        json.dumps(
+            {
+                "nodes": [
+                    {
+                        "id": "seed2024",
+                        "label": "seed2024",
+                        "title": "Seed Paper",
+                        "review_status": "draft",
+                        "target_exists": True,
+                        "is_seed": True,
+                    },
+                    {
+                        "id": "known2023",
+                        "label": "known2023",
+                        "title": "Known Paper",
+                        "review_status": "reviewed",
+                        "target_exists": True,
+                        "is_seed": False,
+                    },
+                ],
+                "edges": [
+                    {
+                        "id": "edge-1",
+                        "source": "seed2024",
+                        "target": "known2023",
+                        "relation_type": "cites",
+                        "depth": 1,
+                        "target_exists": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / "graph.html"
+    result = run_cli(
+        tmp_path,
+        "graph-view",
+        str(graph_path),
+        "--output",
+        str(output_path),
+        "--title",
+        "Graph Demo",
+    )
+    assert result.returncode == 0
+    assert result.stdout == ""
+    html = output_path.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in html
+    assert "<title>Graph Demo</title>" in html
+    assert '"seed2024"' in html
+    assert '"known2023"' in html
+
+
 def test_cli_expand_with_mocked_crossref(tmp_path: Path):
     bib_path = tmp_path / "expand.bib"
     bib_path.write_text(
