@@ -62,6 +62,7 @@ The initial repo includes:
 
 Example applications live alongside the core package rather than defining it. Current examples include:
 
+- a comprehensive CLI cookbook in [examples/cli/README.md](./examples/cli/README.md);
 - a topic-only bootstrap workflow for `artificial life` in [examples/artificial-life/README.md](./examples/artificial-life/README.md);
 - the TalkOrigins bibliography pipeline under [`citegeist.examples.talkorigins`](./src/citegeist/examples/talkorigins.py) with a usage guide in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
 
@@ -149,6 +150,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist discover-oai https://example.edu/oa
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 harvest-oai https://example.edu/oai --metadata-prefix mods --from 2024-01-01 --until 2024-12-31 --limit 10
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --output reviewed.bib
 ```
+
+For a fuller option-by-option CLI cookbook, see [examples/cli/README.md](./examples/cli/README.md).
 
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
