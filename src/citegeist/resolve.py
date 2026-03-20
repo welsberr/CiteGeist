@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 from .bibtex import BibEntry, parse_bibtex
+from .sources import SourceClient
 
 
 @dataclass(slots=True)
@@ -17,8 +16,13 @@ class Resolution:
 
 
 class MetadataResolver:
-    def __init__(self, user_agent: str = "citegeist/0.1 (local research tool)") -> None:
+    def __init__(
+        self,
+        user_agent: str = "citegeist/0.1 (local research tool)",
+        source_client: SourceClient | None = None,
+    ) -> None:
         self.user_agent = user_agent
+        self.source_client = source_client or SourceClient(user_agent=user_agent)
 
     def resolve_entry(self, entry: BibEntry) -> Resolution | None:
         if doi := entry.fields.get("doi"):
@@ -40,7 +44,7 @@ class MetadataResolver:
 
     def resolve_doi(self, doi: str) -> Resolution | None:
         encoded = urllib.parse.quote(doi, safe="")
-        payload = self._get_json(f"https://api.crossref.org/works/{encoded}")
+        payload = self.source_client.get_json(f"https://api.crossref.org/works/{encoded}")
         message = payload.get("message", {})
         if not message:
             return None
@@ -52,13 +56,13 @@ class MetadataResolver:
 
     def search_crossref(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"query.title": title, "rows": limit})
-        payload = self._get_json(f"https://api.crossref.org/works?{query}")
+        payload = self.source_client.get_json(f"https://api.crossref.org/works?{query}")
         items = payload.get("message", {}).get("items", [])
         return [_crossref_message_to_entry(item) for item in items]
 
     def resolve_dblp(self, dblp_key: str) -> Resolution | None:
         encoded_key = urllib.parse.quote(dblp_key, safe="/:")
-        text = self._get_text(f"https://dblp.org/rec/{encoded_key}.bib")
+        text = self.source_client.get_text(f"https://dblp.org/rec/{encoded_key}.bib")
         entries = parse_bibtex(text)
         if not entries:
             return None
@@ -70,7 +74,7 @@ class MetadataResolver:
 
     def search_dblp(self, query_text: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"q": query_text, "format": "json", "h": limit})
-        payload = self._get_json(f"https://dblp.org/search/publ/api?{query}")
+        payload = self.source_client.get_json(f"https://dblp.org/search/publ/api?{query}")
         hits = payload.get("result", {}).get("hits", {}).get("hit", [])
         if isinstance(hits, dict):
             hits = [hits]
@@ -87,7 +91,7 @@ class MetadataResolver:
 
     def resolve_arxiv(self, arxiv_id: str) -> Resolution | None:
         query = urllib.parse.urlencode({"id_list": arxiv_id})
-        root = self._get_xml(f"https://export.arxiv.org/api/query?{query}")
+        root = self.source_client.get_xml(f"https://export.arxiv.org/api/query?{query}")
         namespace = {"atom": "http://www.w3.org/2005/Atom"}
         entry = root.find("atom:entry", namespace)
         if entry is None:
@@ -97,27 +101,6 @@ class MetadataResolver:
             source_type="resolver",
             source_label=f"arxiv:id:{arxiv_id}",
         )
-
-    def _get_json(self, url: str) -> dict:
-        with urllib.request.urlopen(self._request(url)) as response:
-            return json.load(response)
-
-    def _get_text(self, url: str) -> str:
-        with urllib.request.urlopen(self._request(url)) as response:
-            return response.read().decode("utf-8")
-
-    def _get_xml(self, url: str) -> ET.Element:
-        with urllib.request.urlopen(self._request(url)) as response:
-            return ET.fromstring(response.read())
-
-    def _request(self, url: str) -> urllib.request.Request:
-        return urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": self.user_agent,
-            },
-        )
-
 
 def merge_entries(base: BibEntry, resolved: BibEntry) -> BibEntry:
     merged_fields = dict(base.fields)

@@ -51,6 +51,7 @@ The initial repo includes:
 - identifier-first metadata resolution for DOI, DBLP, and arXiv-backed entries;
 - local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
 - Crossref-backed graph expansion that materializes draft referenced works and edge provenance;
+- a dedicated source-client layer with fixture/cache support for live-source development;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
@@ -76,6 +77,7 @@ cd citegeist
 python3 -m virtualenv --always-copy .venv
 .venv/bin/pip install -e .
 .venv/bin/pip install pytest
+mkdir -p .cache/citegeist
 PYTHONPATH=src .venv/bin/python - <<'PY'
 from citegeist import BibliographyStore
 
@@ -119,6 +121,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith202
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 expand smith2024graphs --source crossref
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --output reviewed.bib
 ```
+
+For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
 ## Near-Term Priorities
 

@@ -35,7 +35,7 @@ def test_crossref_expander_creates_draft_nodes_and_relations():
         )
 
         expander = CrossrefExpander()
-        expander.resolver._get_json = lambda _url: {  # type: ignore[method-assign]
+        expander.resolver.source_client.get_json = lambda _url: {  # type: ignore[method-assign]
             "message": {
                 "reference": [
                     {

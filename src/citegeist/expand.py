@@ -34,7 +34,7 @@ class CrossrefExpander:
         if not doi:
             return []
 
-        payload = self.resolver._get_json(  # noqa: SLF001
+        payload = self.resolver.source_client.get_json(
             f"https://api.crossref.org/works/{doi}?mailto=welsberr@gmail.com"
         )
         references = payload.get("message", {}).get("reference", [])
