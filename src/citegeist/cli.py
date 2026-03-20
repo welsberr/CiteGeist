@@ -783,10 +783,23 @@ def _run_extract(input_path: Path, output: str | None) -> int:
     return 0
 
 
+def _print_progress(label: str, index: int, total: int, detail: str | None = None) -> None:
+    message = f"[{index}/{total}] {label}"
+    if detail:
+        message = f"{message}: {detail}"
+    print(message, file=sys.stderr, flush=True)
+
+
+def _print_phase(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
 def _run_resolve(store: BibliographyStore, citation_keys: list[str]) -> int:
     resolver = MetadataResolver()
     exit_code = 0
-    for citation_key in citation_keys:
+    total = len(citation_keys)
+    for index, citation_key in enumerate(citation_keys, start=1):
+        _print_progress("resolving", index, total, citation_key)
         if not _resolve_one(store, resolver, citation_key):
             exit_code = 1
     return exit_code
@@ -846,7 +859,9 @@ def _run_resolve_stubs(
 
     resolver = MetadataResolver()
     exit_code = 0
-    for candidate in candidates:
+    total = len(candidates)
+    for index, candidate in enumerate(candidates, start=1):
+        _print_progress("resolving candidate", index, total, str(candidate["citation_key"]))
         if not _resolve_one(store, resolver, str(candidate["citation_key"])):
             exit_code = 1
     return exit_code
@@ -1240,7 +1255,9 @@ def _run_expand(
         return 1
 
     all_results = []
-    for citation_key in citation_keys:
+    total = len(citation_keys)
+    for index, citation_key in enumerate(citation_keys, start=1):
+        _print_progress("expanding seed", index, total, citation_key)
         all_results.extend(expand_fn(citation_key))
     print(json.dumps([asdict(result) for result in all_results], indent=2))
     return 0
@@ -1259,6 +1276,7 @@ def _run_expand_topic(
     preview: bool,
 ) -> int:
     expander = TopicExpander()
+    _print_phase(f"Loading topic expansion for {topic_slug}")
     stored_topic = store.get_topic(topic_slug)
     effective_phrase = topic_phrase
     if effective_phrase is None and stored_topic is not None:
@@ -1309,6 +1327,7 @@ def _run_harvest_oai(
     review_status: str,
 ) -> int:
     harvester = OaiPmhHarvester()
+    _print_phase(f"Harvesting OAI-PMH records from {base_url}")
     harvested = harvester.list_records(
         base_url,
         metadata_prefix=metadata_prefix,
@@ -1317,7 +1336,9 @@ def _run_harvest_oai(
         date_until=date_until,
         limit=limit,
     )
-    for result in harvested:
+    total = len(harvested)
+    for index, result in enumerate(harvested, start=1):
+        _print_progress("ingesting harvested record", index, total, result.entry.citation_key)
         store.upsert_entry(
             result.entry,
             raw_bibtex=render_bibtex([result.entry]),
@@ -1332,6 +1353,7 @@ def _run_harvest_oai(
 
 def _run_discover_oai(base_url: str) -> int:
     harvester = OaiPmhHarvester()
+    _print_phase(f"Inspecting OAI-PMH repository {base_url}")
     payload = {
         "identify": harvester.identify(base_url),
         "metadata_formats": [asdict(result) for result in harvester.list_metadata_formats(base_url)],
@@ -1358,6 +1380,7 @@ def _run_bootstrap(
         print("bootstrap requires --seed-bib, --topic, or both", file=sys.stderr)
         return 1
 
+    _print_phase("Running bootstrap")
     seed_bibtex = Path(seed_bib).read_text(encoding="utf-8") if seed_bib else None
     bootstrapper = Bootstrapper()
     results = bootstrapper.bootstrap(
@@ -1380,9 +1403,12 @@ def _run_bootstrap(
 def _run_bootstrap_batch(store: BibliographyStore, input_path: Path) -> int:
     jobs = load_batch_jobs(input_path)
     runner = BatchBootstrapRunner()
+    _print_phase(f"Running bootstrap batch with {len(jobs)} jobs")
     results = runner.run(store, jobs)
     payload = []
-    for job_result in results:
+    total = len(results)
+    for index, job_result in enumerate(results, start=1):
+        _print_progress("completed bootstrap job", index, total, job_result.job_name)
         payload.append(
             {
                 "job_name": job_result.job_name,
@@ -1409,6 +1435,7 @@ def _run_scrape_talkorigins(
     review_status: str,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Scraping TalkOrigins example corpus from {base_url}")
     export = scraper.scrape_to_directory(
         base_url=base_url,
         output_dir=output_dir,
@@ -1428,6 +1455,7 @@ def _run_scrape_talkorigins(
 
 def _run_validate_talkorigins(manifest_path: Path) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Validating TalkOrigins manifest {manifest_path}")
     report = scraper.validate_export(manifest_path)
     print(json.dumps(asdict(report), indent=2))
     return 0
@@ -1440,6 +1468,7 @@ def _run_suggest_talkorigins_phrases(
     output: str | None,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Generating TalkOrigins topic phrase suggestions from {manifest_path}")
     suggestions = scraper.suggest_topic_phrases(manifest_path, limit=limit, topic_slug=topic_slug)
     payload = json.dumps([asdict(item) for item in suggestions], indent=2)
     if output:
@@ -1461,7 +1490,8 @@ def _run_apply_topic_phrases(store: BibliographyStore, input_path: Path) -> int:
 
     results: list[dict[str, object]] = []
     exit_code = 0
-    for item in items:
+    total = len(items)
+    for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             continue
         slug = str(item.get("slug") or "")
@@ -1471,6 +1501,7 @@ def _run_apply_topic_phrases(store: BibliographyStore, input_path: Path) -> int:
         if phrase is not None:
             phrase = str(phrase)
         applied = store.set_topic_expansion_phrase(slug, phrase)
+        _print_progress("applying topic phrase", index, total, slug or "<missing-slug>")
         if not applied:
             exit_code = 1
         results.append(
@@ -1496,7 +1527,8 @@ def _run_stage_topic_phrases(store: BibliographyStore, input_path: Path) -> int:
 
     results: list[dict[str, object]] = []
     exit_code = 0
-    for item in items:
+    total = len(items)
+    for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             continue
         slug = str(item.get("slug") or "")
@@ -1514,6 +1546,7 @@ def _run_stage_topic_phrases(store: BibliographyStore, input_path: Path) -> int:
             review_status="pending",
             review_notes=notes,
         )
+        _print_progress("staging topic phrase", index, total, slug or "<missing-slug>")
         if not staged:
             exit_code = 1
         results.append(
@@ -1560,7 +1593,8 @@ def _run_review_topic_phrases(store: BibliographyStore, input_path: Path) -> int
 
     results: list[dict[str, object]] = []
     exit_code = 0
-    for item in items:
+    total = len(items)
+    for index, item in enumerate(items, start=1):
         if not isinstance(item, dict):
             continue
         slug = str(item.get("slug") or "")
@@ -1579,6 +1613,7 @@ def _run_review_topic_phrases(store: BibliographyStore, input_path: Path) -> int
             review_notes=notes,
             applied_phrase=phrase,
         )
+        _print_progress("reviewing topic phrase", index, total, slug or "<missing-slug>")
         if not reviewed:
             exit_code = 1
         results.append(
@@ -1603,6 +1638,7 @@ def _run_duplicates_talkorigins(
     weak_only: bool,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Inspecting TalkOrigins duplicate clusters from {manifest_path}")
     clusters = scraper.inspect_duplicate_clusters(
         manifest_path,
         limit=limit,
@@ -1623,6 +1659,7 @@ def _run_ingest_talkorigins(
     dedupe: bool,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Ingesting TalkOrigins export from {manifest_path}")
     report = scraper.ingest_export(
         manifest_path,
         store,
@@ -1645,6 +1682,7 @@ def _run_enrich_talkorigins(
     allow_unsafe_matches: bool,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Enriching weak TalkOrigins canonicals from {manifest_path}")
     results = scraper.enrich_weak_canonicals(
         manifest_path,
         store,
@@ -1670,6 +1708,7 @@ def _run_review_talkorigins(
     output: str | None,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Building TalkOrigins review export from {manifest_path}")
     review = scraper.build_review_export(
         manifest_path,
         store,
@@ -1693,6 +1732,7 @@ def _run_apply_talkorigins_corrections(
     review_status: str,
 ) -> int:
     scraper = TalkOriginsScraper()
+    _print_phase(f"Applying TalkOrigins corrections from {corrections_path}")
     results = scraper.apply_review_corrections(
         manifest_path,
         corrections_path,

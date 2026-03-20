@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -354,6 +356,53 @@ def test_cli_resolve_stubs_can_enrich_all_misc_entries(tmp_path: Path):
     assert payload["title"] == "Avida Conference Record"
     assert payload["booktitle"] == "Genetic and Evolutionary Computation Conference"
     assert "title" in {item["field_name"] for item in payload["field_conflicts"]}
+
+
+def test_cli_resolve_stubs_reports_progress_on_stderr(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    from citegeist.bibtex import BibEntry
+    from citegeist.resolve import Resolution
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.MetadataResolver.resolve_entry") as mocked_resolve:
+        mocked_resolve.return_value = Resolution(
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="resolvedkey",
+                fields={"title": "Resolved Work", "year": "2002", "doi": "10.1200/JCO.2002.04.117"},
+            ),
+            source_type="resolver",
+            source_label="crossref:doi:10.1200/JCO.2002.04.117",
+        )
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            exit_code = main(
+                [
+                    "--db",
+                    str(database),
+                    "resolve-stubs",
+                    "--doi-only",
+                    "--limit",
+                    "10",
+                ]
+            )
+
+    assert exit_code == 0
+    assert "[1/1] resolving candidate: stubdoi" in stderr_buffer.getvalue()
+    assert "stubdoi\tcrossref:doi:10.1200/JCO.2002.04.117" in stdout_buffer.getvalue()
 
 
 def test_cli_resolve_conflicts_updates_status(tmp_path: Path):

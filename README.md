@@ -157,6 +157,8 @@ For a fuller option-by-option CLI cookbook, see [examples/cli/README.md](./examp
 
 Broad BibTeX exports skip DOI-only placeholder records such as `Referenced work N` by default. Use `--include-stubs` on `export` or `export-topic` if you want those entries included anyway.
 
+Long-running CLI commands report progress on `stderr` so `stdout` remains clean for JSON, BibTeX, or tabular output.
+
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
 ## Example Application
