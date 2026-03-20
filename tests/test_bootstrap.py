@@ -1,0 +1,175 @@
+from citegeist import BibliographyStore
+from citegeist.bootstrap import Bootstrapper
+from citegeist.cli import main
+
+
+def test_bootstrap_from_seed_bib_only():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(
+            store,
+            seed_bibtex="""
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+            expand=False,
+        )
+
+        assert [item.citation_key for item in results] == ["seed2024"]
+        assert store.get_entry("seed2024") is not None
+    finally:
+        store.close()
+
+
+def test_bootstrap_from_topic_only():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: [  # type: ignore[method-assign]
+            __import__("citegeist").BibEntry(
+                entry_type="article",
+                citation_key="topic2024graph",
+                fields={"title": "Graph Topic Result", "year": "2024"},
+            )
+        ]
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(store, topic="graph topic", expand=False)
+
+        assert [item.citation_key for item in results] == ["topic2024graph"]
+        assert store.get_entry("topic2024graph") is not None
+        assert results[0].score > 0
+    finally:
+        store.close()
+
+
+def test_bootstrap_cli_accepts_seed_and_topic(tmp_path):
+    seed_bib = tmp_path / "seed.bib"
+    seed_bib.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.Bootstrapper.bootstrap") as mocked_bootstrap:
+        mocked_bootstrap.return_value = []
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "bootstrap",
+                "--seed-bib",
+                str(seed_bib),
+                "--topic",
+                "graph topic",
+                "--no-expand",
+            ]
+        )
+
+    assert exit_code == 0
+
+
+def test_bootstrap_ranks_and_deduplicates_topic_candidates():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(
+                entry_type="article",
+                citation_key="shared2024graph",
+                fields={"title": "Graph Topic Ranking", "abstract": "graph topic graph"},
+            )
+        ]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(
+                entry_type="article",
+                citation_key="shared2024graph",
+                fields={"title": "Graph Topic Ranking", "abstract": "graph"},
+            ),
+            BibEntry(
+                entry_type="article",
+                citation_key="crossref2024other",
+                fields={"title": "Less relevant paper"},
+            ),
+        ]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(store, topic="graph topic", expand=False, topic_limit=5)
+
+        topic_results = [item for item in results if item.origin == "topic"]
+        assert [item.citation_key for item in topic_results] == ["shared2024graph", "crossref2024other"]
+        assert topic_results[0].score > topic_results[1].score
+    finally:
+        store.close()
+
+
+def test_bootstrap_preview_does_not_write_to_database():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(entry_type="article", citation_key="preview2024graph", fields={"title": "Preview Graph Topic"})
+        ]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(store, topic="graph topic", expand=False, preview_only=True)
+
+        assert [item.citation_key for item in results] == ["preview2024graph"]
+        assert store.get_entry("preview2024graph") is None
+    finally:
+        store.close()
+
+
+def test_bootstrap_topic_commit_limit_restricts_persisted_candidates():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(entry_type="article", citation_key="rank1", fields={"title": "Graph Topic One"}),
+            BibEntry(entry_type="article", citation_key="rank2", fields={"title": "Graph Topic Two"}),
+        ]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(
+            store,
+            topic="graph topic",
+            expand=False,
+            topic_limit=5,
+            topic_commit_limit=1,
+        )
+
+        assert [item.citation_key for item in results if item.origin == "topic"] == ["rank1"]
+        assert store.get_entry("rank1") is not None
+        assert store.get_entry("rank2") is None
+    finally:
+        store.close()

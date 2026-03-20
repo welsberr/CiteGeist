@@ -130,3 +130,250 @@ def test_store_traverses_graph_and_surfaces_missing_targets():
         assert rows[2]["depth"] == 2
     finally:
         store.close()
+
+
+def test_store_records_and_updates_field_conflicts():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+"""
+        )
+        ok = store.record_conflicts(
+            "seed2024",
+            [
+                {
+                    "field_name": "title",
+                    "current_value": "Seed Paper",
+                    "proposed_value": "Resolved Seed Paper",
+                }
+            ],
+            source_type="resolver",
+            source_label="crossref:doi:10.1000/seed",
+        )
+        assert ok is True
+        conflicts = store.get_field_conflicts("seed2024")
+        assert conflicts[0]["field_name"] == "title"
+        assert conflicts[0]["status"] == "open"
+        assert store.set_conflict_status("seed2024", "title", "accepted") == 1
+        updated = store.get_field_conflicts("seed2024", status="accepted")
+        assert len(updated) == 1
+    finally:
+        store.close()
+
+
+def test_store_can_apply_latest_conflict_value():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+"""
+        )
+        store.record_conflicts(
+            "seed2024",
+            [
+                {
+                    "field_name": "title",
+                    "current_value": "Seed Paper",
+                    "proposed_value": "Resolved Seed Paper",
+                }
+            ],
+            source_type="resolver",
+            source_label="crossref:doi:10.1000/seed",
+        )
+
+        assert store.apply_conflict_value("seed2024", "title") is True
+        entry = store.get_entry("seed2024")
+        assert entry is not None
+        assert entry["title"] == "Resolved Seed Paper"
+        accepted = store.get_field_conflicts("seed2024", status="accepted")
+        assert len(accepted) == 1
+    finally:
+        store.close()
+
+
+def test_store_supports_entry_topic_membership():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+"""
+        )
+
+        assert store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        ) is True
+        assert store.add_entry_topic(
+            "seed2024",
+            topic_slug="semantic-search",
+            topic_name="Semantic Search",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/semantic-search",
+            source_label="topic-seed",
+        ) is True
+
+        entry = store.get_entry("seed2024")
+        assert entry is not None
+        assert [topic["slug"] for topic in entry["topics"]] == ["graph-methods", "semantic-search"]
+
+        topics = store.list_topics()
+        assert [topic["slug"] for topic in topics] == ["graph-methods", "semantic-search"]
+        assert topics[0]["entry_count"] == 1
+        topic = store.get_topic("graph-methods")
+        assert topic is not None
+        assert topic["name"] == "Graph Methods"
+        assert topic["expansion_phrase"] is None
+        topic_entries = store.list_topic_entries("graph-methods")
+        assert topic_entries[0]["citation_key"] == "seed2024"
+    finally:
+        store.close()
+
+
+def test_store_can_set_topic_expansion_phrase():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+"""
+        )
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        assert store.set_topic_expansion_phrase("graph-methods", "graph networks biology") is True
+
+        topic = store.get_topic("graph-methods")
+        assert topic is not None
+        assert topic["expansion_phrase"] == "graph networks biology"
+        assert topic["phrase_review_status"] == "unreviewed"
+        topics = store.list_topics()
+        assert topics[0]["expansion_phrase"] == "graph networks biology"
+    finally:
+        store.close()
+
+
+def test_store_can_stage_and_review_topic_phrase_suggestion():
+    store = BibliographyStore()
+    try:
+        store.ensure_topic("graph-methods", "Graph Methods")
+
+        assert store.stage_topic_phrase_suggestion(
+            "graph-methods",
+            "graph networks biology",
+            review_notes="generated from local titles",
+        ) is True
+
+        staged = store.get_topic("graph-methods")
+        assert staged is not None
+        assert staged["suggested_phrase"] == "graph networks biology"
+        assert staged["expansion_phrase"] is None
+        assert staged["phrase_review_status"] == "pending"
+        assert staged["phrase_review_notes"] == "generated from local titles"
+
+        assert store.review_topic_phrase_suggestion(
+            "graph-methods",
+            "accepted",
+            review_notes="looks good",
+        ) is True
+
+        reviewed = store.get_topic("graph-methods")
+        assert reviewed is not None
+        assert reviewed["suggested_phrase"] == "graph networks biology"
+        assert reviewed["expansion_phrase"] == "graph networks biology"
+        assert reviewed["phrase_review_status"] == "accepted"
+        assert reviewed["phrase_review_notes"] == "looks good"
+    finally:
+        store.close()
+
+
+def test_store_can_filter_topics_by_phrase_review_status():
+    store = BibliographyStore()
+    try:
+        store.ensure_topic("graph-methods", "Graph Methods")
+        store.ensure_topic("abiogenesis", "Abiogenesis")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+        store.stage_topic_phrase_suggestion("abiogenesis", "abiogenesis life origin")
+        store.review_topic_phrase_suggestion("abiogenesis", "accepted")
+
+        pending_topics = store.list_topics(phrase_review_status="pending")
+        accepted_topics = store.list_topics(phrase_review_status="accepted")
+
+        assert [topic["slug"] for topic in pending_topics] == ["graph-methods"]
+        assert [topic["slug"] for topic in accepted_topics] == ["abiogenesis"]
+    finally:
+        store.close()
+
+
+def test_store_search_text_can_filter_by_topic():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Graph Methods for Biology},
+  year = {2024},
+  abstract = {A graph methods paper.}
+}
+
+@article{other2023,
+  author = {Other, Bob},
+  title = {Graph Methods for Chemistry},
+  year = {2023},
+  abstract = {Another graph methods paper.}
+}
+"""
+        )
+
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="biology",
+            topic_name="Biology",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/biology",
+            source_label="topic-seed",
+        )
+        store.add_entry_topic(
+            "other2023",
+            topic_slug="chemistry",
+            topic_name="Chemistry",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/chemistry",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+
+        results = store.search_text("graph", topic_slug="biology")
+
+        assert [row["citation_key"] for row in results] == ["seed2024"]
+    finally:
+        store.close()

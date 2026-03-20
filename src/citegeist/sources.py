@@ -30,11 +30,11 @@ class SourceClient:
     def get_text(self, url: str) -> str:
         cached = self._read_cached(url, "txt")
         if cached is not None:
-            return cached.decode("utf-8")
+            return self._decode_text(cached)
 
         payload = self._fetch_bytes(url)
         self._write_cache(url, "txt", payload)
-        return payload.decode("utf-8")
+        return self._decode_text(payload)
 
     def get_xml(self, url: str) -> ET.Element:
         cached = self._read_cached(url, "xml")
@@ -76,3 +76,11 @@ class SourceClient:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         path = self.cache_dir / self._cache_key(url, suffix)
         path.write_bytes(payload)
+
+    def _decode_text(self, payload: bytes) -> str:
+        for encoding in ("utf-8", "utf-8-sig", "iso-8859-1", "latin-1"):
+            try:
+                return payload.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return payload.decode("utf-8", errors="replace")

@@ -95,6 +95,29 @@ class BibliographyStore:
                 PRIMARY KEY (source_entry_id, target_citation_key, relation_type)
             );
 
+            CREATE TABLE IF NOT EXISTS topics (
+                id INTEGER PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_url TEXT,
+                expansion_phrase TEXT,
+                suggested_phrase TEXT,
+                phrase_review_status TEXT NOT NULL DEFAULT 'unreviewed',
+                phrase_review_notes TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS entry_topics (
+                entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                source_label TEXT NOT NULL,
+                confidence REAL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (entry_id, topic_id)
+            );
+
             CREATE TABLE IF NOT EXISTS field_provenance (
                 id INTEGER PRIMARY KEY,
                 entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
@@ -117,10 +140,23 @@ class BibliographyStore:
                 confidence REAL,
                 recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS field_conflicts (
+                id INTEGER PRIMARY KEY,
+                entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                field_name TEXT NOT NULL,
+                current_value TEXT,
+                proposed_value TEXT,
+                source_type TEXT NOT NULL,
+                source_label TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
         self._ensure_entry_columns()
+        self._ensure_topic_columns()
 
         if self._fts5_enabled:
             self.connection.execute(
@@ -177,6 +213,7 @@ class BibliographyStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(citation_key) DO UPDATE SET
                 entry_type = excluded.entry_type,
+                review_status = excluded.review_status,
                 title = excluded.title,
                 year = excluded.year,
                 journal = excluded.journal,
@@ -280,30 +317,58 @@ class BibliographyStore:
 
         return entry_id
 
-    def search_text(self, query: str, limit: int = 10) -> list[dict[str, object]]:
+    def search_text(self, query: str, limit: int = 10, topic_slug: str | None = None) -> list[dict[str, object]]:
         if self._fts5_enabled:
-            rows = self.connection.execute(
-                """
-                SELECT e.citation_key, e.title, e.year, bm25(entry_text_fts) AS score
-                FROM entry_text_fts
-                JOIN entries e ON e.citation_key = entry_text_fts.citation_key
-                WHERE entry_text_fts MATCH ?
-                ORDER BY score
-                LIMIT ?
-                """,
-                (query, limit),
-            ).fetchall()
+            if topic_slug:
+                rows = self.connection.execute(
+                    """
+                    SELECT DISTINCT e.citation_key, e.title, e.year, bm25(entry_text_fts) AS score
+                    FROM entry_text_fts
+                    JOIN entries e ON e.citation_key = entry_text_fts.citation_key
+                    JOIN entry_topics et ON et.entry_id = e.id
+                    JOIN topics t ON t.id = et.topic_id
+                    WHERE entry_text_fts MATCH ? AND t.slug = ?
+                    ORDER BY score
+                    LIMIT ?
+                    """,
+                    (query, topic_slug, limit),
+                ).fetchall()
+            else:
+                rows = self.connection.execute(
+                    """
+                    SELECT e.citation_key, e.title, e.year, bm25(entry_text_fts) AS score
+                    FROM entry_text_fts
+                    JOIN entries e ON e.citation_key = entry_text_fts.citation_key
+                    WHERE entry_text_fts MATCH ?
+                    ORDER BY score
+                    LIMIT ?
+                    """,
+                    (query, limit),
+                ).fetchall()
         else:
             pattern = f"%{query}%"
-            rows = self.connection.execute(
-                """
-                SELECT citation_key, title, year, 0.0 AS score
-                FROM entries
-                WHERE title LIKE ? OR abstract LIKE ? OR fulltext LIKE ?
-                LIMIT ?
-                """,
-                (pattern, pattern, pattern, limit),
-            ).fetchall()
+            if topic_slug:
+                rows = self.connection.execute(
+                    """
+                    SELECT DISTINCT e.citation_key, e.title, e.year, 0.0 AS score
+                    FROM entries e
+                    JOIN entry_topics et ON et.entry_id = e.id
+                    JOIN topics t ON t.id = et.topic_id
+                    WHERE t.slug = ? AND (e.title LIKE ? OR e.abstract LIKE ? OR e.fulltext LIKE ?)
+                    LIMIT ?
+                    """,
+                    (topic_slug, pattern, pattern, pattern, limit),
+                ).fetchall()
+            else:
+                rows = self.connection.execute(
+                    """
+                    SELECT citation_key, title, year, 0.0 AS score
+                    FROM entries
+                    WHERE title LIKE ? OR abstract LIKE ? OR fulltext LIKE ?
+                    LIMIT ?
+                    """,
+                    (pattern, pattern, pattern, limit),
+                ).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -383,7 +448,11 @@ class BibliographyStore:
             "SELECT * FROM entries WHERE citation_key = ?",
             (citation_key,),
         ).fetchone()
-        return self._row_to_entry_dict(row) if row else None
+        if row is None:
+            return None
+        payload = self._row_to_entry_dict(row)
+        payload["topics"] = self.get_entry_topics(citation_key)
+        return payload
 
     def list_entries(self, limit: int = 50) -> list[dict[str, object]]:
         rows = self.connection.execute(
@@ -394,6 +463,227 @@ class BibliographyStore:
             LIMIT ?
             """,
             (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def ensure_topic(
+        self,
+        slug: str,
+        name: str,
+        source_type: str = "manual",
+        source_url: str | None = None,
+        expansion_phrase: str | None = None,
+        suggested_phrase: str | None = None,
+        phrase_review_status: str | None = None,
+        phrase_review_notes: str | None = None,
+    ) -> int:
+        row = self.connection.execute(
+            """
+            INSERT INTO topics (
+                slug, name, source_type, source_url, expansion_phrase,
+                suggested_phrase, phrase_review_status, phrase_review_notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 'unreviewed'), ?)
+            ON CONFLICT(slug) DO UPDATE SET
+                name = excluded.name,
+                source_type = excluded.source_type,
+                source_url = COALESCE(excluded.source_url, topics.source_url),
+                expansion_phrase = COALESCE(excluded.expansion_phrase, topics.expansion_phrase),
+                suggested_phrase = COALESCE(excluded.suggested_phrase, topics.suggested_phrase),
+                phrase_review_status = COALESCE(excluded.phrase_review_status, topics.phrase_review_status),
+                phrase_review_notes = COALESCE(excluded.phrase_review_notes, topics.phrase_review_notes),
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+            """,
+            (
+                slug,
+                name,
+                source_type,
+                source_url,
+                expansion_phrase,
+                suggested_phrase,
+                phrase_review_status,
+                phrase_review_notes,
+            ),
+        ).fetchone()
+        return int(row["id"])
+
+    def add_entry_topic(
+        self,
+        citation_key: str,
+        topic_slug: str,
+        topic_name: str,
+        source_type: str = "manual",
+        source_url: str | None = None,
+        source_label: str = "manual",
+        confidence: float = 1.0,
+        expansion_phrase: str | None = None,
+    ) -> bool:
+        entry_row = self.connection.execute(
+            "SELECT id FROM entries WHERE citation_key = ?",
+            (citation_key,),
+        ).fetchone()
+        if entry_row is None:
+            return False
+
+        topic_id = self.ensure_topic(
+            topic_slug,
+            topic_name,
+            source_type=source_type,
+            source_url=source_url,
+            expansion_phrase=expansion_phrase,
+        )
+        self.connection.execute(
+            """
+            INSERT INTO entry_topics (entry_id, topic_id, source_label, confidence)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(entry_id, topic_id) DO UPDATE SET
+                source_label = excluded.source_label,
+                confidence = excluded.confidence
+            """,
+            (int(entry_row["id"]), topic_id, source_label, confidence),
+        )
+        return True
+
+    def get_entry_topics(self, citation_key: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT t.slug, t.name, t.source_type, t.source_url, et.source_label, et.confidence
+            FROM entry_topics et
+            JOIN entries e ON e.id = et.entry_id
+            JOIN topics t ON t.id = et.topic_id
+            WHERE e.citation_key = ?
+            ORDER BY t.name, t.slug
+            """,
+            (citation_key,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_topics(
+        self,
+        limit: int = 100,
+        phrase_review_status: str | None = None,
+    ) -> list[dict[str, object]]:
+        where = ""
+        params: list[object] = []
+        if phrase_review_status is not None:
+            where = "WHERE t.phrase_review_status = ?"
+            params.append(phrase_review_status)
+        params.append(limit)
+        rows = self.connection.execute(
+            f"""
+            SELECT t.slug, t.name, t.source_type, t.source_url, t.expansion_phrase,
+                   t.suggested_phrase, t.phrase_review_status, t.phrase_review_notes,
+                   COUNT(et.entry_id) AS entry_count
+            FROM topics t
+            LEFT JOIN entry_topics et ON et.topic_id = t.id
+            {where}
+            GROUP BY t.id, t.slug, t.name, t.source_type, t.source_url, t.expansion_phrase,
+                     t.suggested_phrase, t.phrase_review_status, t.phrase_review_notes
+            ORDER BY t.name, t.slug
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_topic(self, slug: str) -> dict[str, object] | None:
+        row = self.connection.execute(
+            """
+            SELECT t.slug, t.name, t.source_type, t.source_url, t.expansion_phrase,
+                   t.suggested_phrase, t.phrase_review_status, t.phrase_review_notes,
+                   COUNT(et.entry_id) AS entry_count
+            FROM topics t
+            LEFT JOIN entry_topics et ON et.topic_id = t.id
+            WHERE t.slug = ?
+            GROUP BY t.id, t.slug, t.name, t.source_type, t.source_url, t.expansion_phrase,
+                     t.suggested_phrase, t.phrase_review_status, t.phrase_review_notes
+            """,
+            (slug,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def set_topic_expansion_phrase(self, slug: str, expansion_phrase: str | None) -> bool:
+        row = self.connection.execute(
+            """
+            UPDATE topics
+            SET expansion_phrase = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE slug = ?
+            RETURNING id
+            """,
+            (expansion_phrase, slug),
+        ).fetchone()
+        self.connection.commit()
+        return row is not None
+
+    def stage_topic_phrase_suggestion(
+        self,
+        slug: str,
+        suggested_phrase: str | None,
+        review_status: str = "pending",
+        review_notes: str | None = None,
+    ) -> bool:
+        row = self.connection.execute(
+            """
+            UPDATE topics
+            SET suggested_phrase = ?,
+                phrase_review_status = ?,
+                phrase_review_notes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE slug = ?
+            RETURNING id
+            """,
+            (suggested_phrase, review_status, review_notes, slug),
+        ).fetchone()
+        self.connection.commit()
+        return row is not None
+
+    def review_topic_phrase_suggestion(
+        self,
+        slug: str,
+        review_status: str,
+        review_notes: str | None = None,
+        applied_phrase: str | None = None,
+    ) -> bool:
+        topic = self.get_topic(slug)
+        if topic is None:
+            return False
+
+        suggested_phrase = topic.get("suggested_phrase")
+        expansion_phrase = topic.get("expansion_phrase")
+        if review_status == "accepted":
+            expansion_phrase = applied_phrase if applied_phrase is not None else suggested_phrase
+        elif applied_phrase is not None:
+            expansion_phrase = applied_phrase
+
+        row = self.connection.execute(
+            """
+            UPDATE topics
+            SET expansion_phrase = ?,
+                phrase_review_status = ?,
+                phrase_review_notes = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE slug = ?
+            RETURNING id
+            """,
+            (expansion_phrase, review_status, review_notes, slug),
+        ).fetchone()
+        self.connection.commit()
+        return row is not None
+
+    def list_topic_entries(self, topic_slug: str, limit: int = 100) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT e.citation_key, e.entry_type, e.review_status, e.title, e.year,
+                   t.slug AS topic_slug, t.name AS topic_name, et.source_label, et.confidence
+            FROM entry_topics et
+            JOIN topics t ON t.id = et.topic_id
+            JOIN entries e ON e.id = et.entry_id
+            WHERE t.slug = ?
+            ORDER BY COALESCE(e.year, ''), e.citation_key
+            LIMIT ?
+            """,
+            (topic_slug, limit),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -433,6 +723,114 @@ class BibliographyStore:
             source_type=source_type,
             source_label=source_label,
             review_status=review_status,
+        )
+        self.connection.commit()
+        return True
+
+    def record_conflicts(
+        self,
+        citation_key: str,
+        conflicts: list[dict[str, str]],
+        source_type: str,
+        source_label: str,
+    ) -> bool:
+        row = self.connection.execute(
+            "SELECT id FROM entries WHERE citation_key = ?",
+            (citation_key,),
+        ).fetchone()
+        if row is None:
+            return False
+
+        entry_id = int(row["id"])
+        for conflict in conflicts:
+            self.connection.execute(
+                """
+                INSERT INTO field_conflicts (
+                    entry_id, field_name, current_value, proposed_value, source_type, source_label, status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'open')
+                """,
+                (
+                    entry_id,
+                    conflict["field_name"],
+                    conflict.get("current_value"),
+                    conflict.get("proposed_value"),
+                    source_type,
+                    source_label,
+                ),
+            )
+        self.connection.commit()
+        return True
+
+    def get_field_conflicts(self, citation_key: str, status: str | None = None) -> list[dict[str, object]]:
+        where = ""
+        params: list[object] = [citation_key]
+        if status is not None:
+            where = " AND fc.status = ?"
+            params.append(status)
+
+        rows = self.connection.execute(
+            f"""
+            SELECT fc.field_name, fc.current_value, fc.proposed_value, fc.source_type,
+                   fc.source_label, fc.status, fc.recorded_at
+            FROM field_conflicts fc
+            JOIN entries e ON e.id = fc.entry_id
+            WHERE e.citation_key = ?{where}
+            ORDER BY fc.recorded_at, fc.id
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_conflict_status(self, citation_key: str, field_name: str, status: str) -> int:
+        row = self.connection.execute(
+            "SELECT id FROM entries WHERE citation_key = ?",
+            (citation_key,),
+        ).fetchone()
+        if row is None:
+            return 0
+        entry_id = int(row["id"])
+        result = self.connection.execute(
+            """
+            UPDATE field_conflicts
+            SET status = ?
+            WHERE entry_id = ? AND field_name = ? AND status = 'open'
+            """,
+            (status, entry_id, field_name),
+        )
+        self.connection.commit()
+        return result.rowcount
+
+    def apply_conflict_value(self, citation_key: str, field_name: str) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT fc.id, fc.proposed_value, e.review_status
+            FROM field_conflicts fc
+            JOIN entries e ON e.id = fc.entry_id
+            WHERE e.citation_key = ? AND fc.field_name = ? AND fc.status = 'open'
+            ORDER BY fc.recorded_at DESC, fc.id DESC
+            LIMIT 1
+            """,
+            (citation_key, field_name),
+        ).fetchone()
+        if row is None:
+            return False
+
+        entry = self._load_bib_entry(citation_key)
+        if entry is None:
+            return False
+
+        proposed_value = str(row["proposed_value"] or "")
+        entry.fields[field_name] = proposed_value
+        self.upsert_entry(
+            entry,
+            raw_bibtex=_entry_to_bibtex(entry),
+            source_type="manual_review",
+            source_label=f"conflict_accept:{field_name}",
+            review_status=str(row["review_status"] or "draft"),
+        )
+        self.connection.execute(
+            "UPDATE field_conflicts SET status = 'accepted' WHERE id = ?",
+            (int(row["id"]),),
         )
         self.connection.commit()
         return True
@@ -650,6 +1048,37 @@ class BibliographyStore:
             self.connection.execute(
                 "ALTER TABLE entries ADD COLUMN review_status TEXT NOT NULL DEFAULT 'draft'"
             )
+
+    def _ensure_topic_columns(self) -> None:
+        columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(topics)").fetchall()
+        }
+        if "expansion_phrase" not in columns:
+            try:
+                self.connection.execute("ALTER TABLE topics ADD COLUMN expansion_phrase TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "suggested_phrase" not in columns:
+            try:
+                self.connection.execute("ALTER TABLE topics ADD COLUMN suggested_phrase TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "phrase_review_status" not in columns:
+            try:
+                self.connection.execute(
+                    "ALTER TABLE topics ADD COLUMN phrase_review_status TEXT NOT NULL DEFAULT 'unreviewed'"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+        if "phrase_review_notes" not in columns:
+            try:
+                self.connection.execute("ALTER TABLE topics ADD COLUMN phrase_review_notes TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
     def _record_field_provenance(
         self,

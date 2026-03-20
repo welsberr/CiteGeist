@@ -28,3 +28,14 @@ def test_source_client_writes_cache_after_fetch(tmp_path: Path):
 
     assert payload["ok"] is True
     assert any(cache_dir.iterdir())
+
+
+def test_source_client_falls_back_to_latin1_for_text(tmp_path: Path):
+    client = SourceClient(cache_dir=tmp_path / "cache")
+    url = "https://example.org/latin1"
+
+    client._fetch_bytes = lambda _url: "café".encode("iso-8859-1")  # type: ignore[method-assign]
+
+    payload = client.get_text(url)
+
+    assert payload == "café"

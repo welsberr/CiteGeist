@@ -30,6 +30,9 @@ class MetadataResolver:
             resolved = self.resolve_doi(doi)
             if resolved is not None:
                 return resolved
+            resolved = self.resolve_datacite_doi(doi)
+            if resolved is not None:
+                return resolved
 
         if openalex_id := entry.fields.get("openalex"):
             resolved = self.resolve_openalex(openalex_id)
@@ -47,6 +50,20 @@ class MetadataResolver:
                 return resolved
 
         if title := entry.fields.get("title"):
+            resolved = self.search_crossref_best_match(
+                title=title,
+                author_text=entry.fields.get("author", ""),
+                year=entry.fields.get("year", ""),
+            )
+            if resolved is not None:
+                return resolved
+            resolved = self.search_datacite_best_match(
+                title=title,
+                author_text=entry.fields.get("author", ""),
+                year=entry.fields.get("year", ""),
+            )
+            if resolved is not None:
+                return resolved
             resolved = self.search_openalex_best_match(
                 title=title,
                 author_text=entry.fields.get("author", ""),
@@ -74,6 +91,26 @@ class MetadataResolver:
         payload = self.source_client.get_json(f"https://api.crossref.org/works?{query}")
         items = payload.get("message", {}).get("items", [])
         return [_crossref_message_to_entry(item) for item in items]
+
+    def search_crossref_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        candidate = _select_best_title_match(
+            self.search_crossref(title, limit=5),
+            title=title,
+            author_text=author_text,
+            year=year,
+        )
+        if candidate is None:
+            return None
+        return Resolution(
+            entry=candidate,
+            source_type="resolver",
+            source_label=f"crossref:search:{title}",
+        )
 
     def resolve_dblp(self, dblp_key: str) -> Resolution | None:
         encoded_key = urllib.parse.quote(dblp_key, safe="/:")
@@ -128,6 +165,43 @@ class MetadataResolver:
             source_label=f"openalex:id:{normalized_id}",
         )
 
+    def resolve_datacite_doi(self, doi: str) -> Resolution | None:
+        encoded = urllib.parse.quote(doi, safe="")
+        payload = self.source_client.get_json(f"https://api.datacite.org/dois/{encoded}")
+        data = payload.get("data", {})
+        if not data:
+            return None
+        return Resolution(
+            entry=_datacite_work_to_entry(data),
+            source_type="resolver",
+            source_label=f"datacite:doi:{doi}",
+        )
+
+    def search_datacite(self, title: str, limit: int = 5) -> list[BibEntry]:
+        query = urllib.parse.urlencode({"query": title, "page[size]": limit})
+        payload = self.source_client.get_json(f"https://api.datacite.org/dois?{query}")
+        return [_datacite_work_to_entry(item) for item in payload.get("data", [])]
+
+    def search_datacite_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        candidate = _select_best_title_match(
+            self.search_datacite(title, limit=5),
+            title=title,
+            author_text=author_text,
+            year=year,
+        )
+        if candidate is None:
+            return None
+        return Resolution(
+            entry=candidate,
+            source_type="resolver",
+            source_label=f"datacite:search:{title}",
+        )
+
     def search_openalex(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"search": title, "per-page": limit})
         payload = self.source_client.get_json(f"https://api.openalex.org/works?{query}")
@@ -139,42 +213,50 @@ class MetadataResolver:
         author_text: str = "",
         year: str = "",
     ) -> Resolution | None:
-        candidates = self.search_openalex(title, limit=5)
-        if not candidates:
+        candidate = _select_best_title_match(
+            self.search_openalex(title, limit=5),
+            title=title,
+            author_text=author_text,
+            year=year,
+        )
+        if candidate is None:
             return None
-
-        title_norm = _normalize_match_text(title)
-        author_norm = _normalize_match_text(author_text)
-        for candidate in candidates:
-            candidate_title = _normalize_match_text(candidate.fields.get("title", ""))
-            candidate_author = _normalize_match_text(candidate.fields.get("author", ""))
-            candidate_year = candidate.fields.get("year", "")
-            if candidate_title == title_norm:
-                if author_norm and candidate_author and author_norm.split(" and ")[0] not in candidate_author:
-                    continue
-                if year and candidate_year and year != candidate_year:
-                    continue
-                return Resolution(
-                    entry=candidate,
-                    source_type="resolver",
-                    source_label=f"openalex:search:{title}",
-                )
-
         return Resolution(
-            entry=candidates[0],
+            entry=candidate,
             source_type="resolver",
             source_label=f"openalex:search:{title}",
         )
 
 def merge_entries(base: BibEntry, resolved: BibEntry) -> BibEntry:
+    merged, _ = merge_entries_with_conflicts(base, resolved)
+    return merged
+
+
+def merge_entries_with_conflicts(base: BibEntry, resolved: BibEntry) -> tuple[BibEntry, list[dict[str, str]]]:
     merged_fields = dict(base.fields)
+    conflicts: list[dict[str, str]] = []
     for key, value in resolved.fields.items():
-        if value and (key not in merged_fields or not merged_fields[key]):
+        if not value:
+            continue
+        current_value = merged_fields.get(key, "")
+        if current_value and current_value != value:
+            conflicts.append(
+                {
+                    "field_name": key,
+                    "current_value": current_value,
+                    "proposed_value": value,
+                }
+            )
+            continue
+        if key not in merged_fields or not merged_fields[key]:
             merged_fields[key] = value
-    return BibEntry(
-        entry_type=base.entry_type or resolved.entry_type,
-        citation_key=base.citation_key,
-        fields=merged_fields,
+    return (
+        BibEntry(
+            entry_type=base.entry_type or resolved.entry_type,
+            citation_key=base.citation_key,
+            fields=merged_fields,
+        ),
+        conflicts,
     )
 
 
@@ -363,3 +445,123 @@ def _normalize_match_text(value: str) -> str:
     lowered = value.lower()
     lowered = re.sub(r"\W+", " ", lowered)
     return " ".join(lowered.split())
+
+
+def _select_best_title_match(
+    candidates: list[BibEntry],
+    title: str,
+    author_text: str = "",
+    year: str = "",
+) -> BibEntry | None:
+    if not candidates:
+        return None
+
+    title_norm = _normalize_match_text(title)
+    author_tokens = _author_match_tokens(author_text)
+    year_text = str(year or "").strip()
+
+    for candidate in candidates:
+        candidate_title = _normalize_match_text(candidate.fields.get("title", ""))
+        if candidate_title != title_norm:
+            continue
+        candidate_year = str(candidate.fields.get("year", "") or "").strip()
+        if year_text and candidate_year and year_text != candidate_year:
+            continue
+        if author_tokens and not _candidate_matches_author_tokens(candidate, author_tokens):
+            continue
+        return candidate
+    return None
+
+
+def _author_match_tokens(author_text: str) -> set[str]:
+    normalized = _normalize_match_text(author_text)
+    if not normalized:
+        return set()
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 2 and token not in {"and", "et", "al"}
+    }
+    return tokens
+
+
+def _candidate_matches_author_tokens(candidate: BibEntry, author_tokens: set[str]) -> bool:
+    candidate_author = _normalize_match_text(candidate.fields.get("author", ""))
+    if not candidate_author:
+        return False
+    candidate_tokens = set(re.findall(r"[a-z0-9]+", candidate_author))
+    return bool(author_tokens & candidate_tokens)
+
+
+def _datacite_work_to_entry(data: dict) -> BibEntry:
+    attributes = data.get("attributes", {})
+    doi = str(attributes.get("doi") or "")
+    titles = attributes.get("titles") or []
+    creators = attributes.get("creators") or []
+    descriptions = attributes.get("descriptions") or []
+    publisher = str(attributes.get("publisher") or "")
+    year = str(attributes.get("publicationYear") or "")
+    url = str(attributes.get("url") or "")
+    types = attributes.get("types") or {}
+
+    title = titles[0].get("title", "") if titles else ""
+    author_names = " and ".join(_datacite_creator_name(creator) for creator in creators if _datacite_creator_name(creator))
+    abstract = _datacite_abstract(descriptions)
+    entry_type = _datacite_type_to_bibtype(str(types.get("resourceTypeGeneral") or ""))
+
+    fields: dict[str, str] = {}
+    if title:
+        fields["title"] = title
+    if author_names:
+        fields["author"] = author_names
+    if year:
+        fields["year"] = year
+    if doi:
+        fields["doi"] = doi
+    if url:
+        fields["url"] = url
+    elif doi:
+        fields["url"] = f"https://doi.org/{doi}"
+    if publisher:
+        fields["publisher"] = publisher
+    if abstract:
+        fields["abstract"] = abstract
+
+    citation_key = _make_resolution_key(author_names or "datacite", year or "n.d.", title or doi or "untitled")
+    return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
+
+
+def _datacite_creator_name(creator: dict) -> str:
+    family = str(creator.get("familyName") or "")
+    given = str(creator.get("givenName") or "")
+    if family and given:
+        return f"{family}, {given}"
+    return str(creator.get("name") or family or given)
+
+
+def _datacite_abstract(descriptions: list[dict]) -> str:
+    for description in descriptions:
+        if str(description.get("descriptionType") or "").lower() == "abstract":
+            return str(description.get("description") or "")
+    return ""
+
+
+def _datacite_type_to_bibtype(resource_type: str) -> str:
+    lowered = resource_type.lower()
+    mapping = {
+        "audiovisual": "misc",
+        "book": "book",
+        "bookchapter": "incollection",
+        "collection": "misc",
+        "computationalnotebook": "misc",
+        "conferencepaper": "inproceedings",
+        "dataset": "misc",
+        "dissertation": "phdthesis",
+        "image": "misc",
+        "journalarticle": "article",
+        "model": "misc",
+        "report": "techreport",
+        "software": "misc",
+        "text": "misc",
+    }
+    return mapping.get(lowered, "misc")

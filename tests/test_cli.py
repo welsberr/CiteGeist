@@ -119,7 +119,7 @@ def test_cli_resolve_updates_entry(tmp_path: Path):
                 citation_key="resolvedkey",
                 fields={
                     "author": "Smith, Jane",
-                    "title": "Graph-first bibliography augmentation",
+                    "title": "Resolved Graph-first bibliography augmentation",
                     "year": "2024",
                     "doi": "10.1000/example-doi",
                     "journal": "Journal of Graph Studies",
@@ -138,6 +138,803 @@ def test_cli_resolve_updates_entry(tmp_path: Path):
         )
 
     assert exit_code == 0
+    show = run_cli(tmp_path, "show", "--conflicts", "smith2024graphs")
+    assert show.returncode == 0
+    payload = json.loads(show.stdout)
+    assert payload["field_conflicts"][0]["field_name"] == "title"
+
+
+def test_cli_resolve_conflicts_updates_status(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{smith2024graphs,
+  author = {Smith, Jane},
+  title = {Graph-first bibliography augmentation},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.record_conflicts(
+            "smith2024graphs",
+            [
+                {
+                    "field_name": "title",
+                    "current_value": "Graph-first bibliography augmentation",
+                    "proposed_value": "Resolved title",
+                }
+            ],
+            source_type="resolver",
+            source_label="openalex:search:Graph-first bibliography augmentation",
+        )
+    finally:
+        store.close()
+
+    result = run_cli(tmp_path, "resolve-conflicts", "smith2024graphs", "title", "accepted")
+    assert result.returncode == 0
+    assert "accepted" in result.stdout
+
+
+def test_cli_apply_conflict_updates_entry_value(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{smith2024graphs,
+  author = {Smith, Jane},
+  title = {Graph-first bibliography augmentation},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.record_conflicts(
+            "smith2024graphs",
+            [
+                {
+                    "field_name": "title",
+                    "current_value": "Graph-first bibliography augmentation",
+                    "proposed_value": "Resolved Graph-first bibliography augmentation",
+                }
+            ],
+            source_type="resolver",
+            source_label="openalex:search:Graph-first bibliography augmentation",
+        )
+    finally:
+        store.close()
+
+    result = run_cli(tmp_path, "apply-conflict", "smith2024graphs", "title")
+    assert result.returncode == 0
+    assert "applied" in result.stdout
+
+    show = run_cli(tmp_path, "show", "smith2024graphs")
+    payload = json.loads(show.stdout)
+    assert payload["title"] == "Resolved Graph-first bibliography augmentation"
+
+
+def test_cli_discover_oai_outputs_identity_and_sets():
+    from unittest.mock import patch
+    from citegeist.harvest import OaiMetadataFormat, OaiSet
+
+    with patch("citegeist.cli.OaiPmhHarvester.identify") as mocked_identify, patch(
+        "citegeist.cli.OaiPmhHarvester.list_sets"
+    ) as mocked_sets, patch("citegeist.cli.OaiPmhHarvester.list_metadata_formats") as mocked_formats:
+        mocked_identify.return_value = {
+            "repositoryName": "Example Repository",
+            "granularity": "YYYY-MM-DD",
+        }
+        mocked_formats.return_value = [
+            OaiMetadataFormat(
+                metadata_prefix="oai_dc",
+                schema="http://www.openarchives.org/OAI/2.0/oai_dc.xsd",
+                metadata_namespace="http://www.openarchives.org/OAI/2.0/oai_dc/",
+            )
+        ]
+        mocked_sets.return_value = [
+            OaiSet(set_spec="theses", set_name="Theses", set_description="Graduate theses")
+        ]
+        exit_code = main(["discover-oai", "https://example.edu/oai"])
+
+    assert exit_code == 0
+
+
+def test_cli_bootstrap_preview_mode(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.Bootstrapper.bootstrap") as mocked_bootstrap:
+        mocked_bootstrap.return_value = []
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "bootstrap",
+                "--topic",
+                "graph topic",
+                "--preview",
+                "--topic-commit-limit",
+                "2",
+            ]
+        )
+
+    assert exit_code == 0
+    _, kwargs = mocked_bootstrap.call_args
+    assert kwargs["preview_only"] is True
+    assert kwargs["topic_commit_limit"] == 2
+
+
+def test_cli_bootstrap_accepts_stored_topic_metadata(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.Bootstrapper.bootstrap") as mocked_bootstrap:
+        mocked_bootstrap.return_value = []
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "bootstrap",
+                "--topic",
+                "graph topic",
+                "--topic-slug",
+                "graph-methods",
+                "--topic-name",
+                "Graph Methods",
+                "--store-topic-phrase",
+                "graph networks biology",
+            ]
+        )
+
+    assert exit_code == 0
+    _, kwargs = mocked_bootstrap.call_args
+    assert kwargs["topic_slug"] == "graph-methods"
+    assert kwargs["topic_name"] == "Graph Methods"
+    assert kwargs["topic_phrase"] == "graph networks biology"
+
+
+def test_cli_scrape_talkorigins_accepts_output_dir(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.TalkOriginsScraper.scrape_to_directory") as mocked_scrape:
+        mocked_scrape.return_value = __import__("citegeist").TalkOriginsBatchExport(
+            base_url="https://www.talkorigins.org/origins/biblio/",
+            output_dir=str(tmp_path),
+            topic_count=1,
+            entry_count=2,
+            jobs_path=str(tmp_path / "jobs.json"),
+            manifest_path=str(tmp_path / "manifest.json"),
+            seed_sets=[],
+        )
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "scrape-talkorigins",
+                str(tmp_path / "talkorigins-out"),
+                "--limit-topics",
+                "3",
+                "--limit-entries-per-topic",
+                "10",
+                "--no-resume",
+                "--no-expand",
+            ]
+        )
+
+    assert exit_code == 0
+
+
+def test_cli_validate_talkorigins_accepts_manifest(tmp_path):
+    from unittest.mock import patch
+
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    with patch("citegeist.cli.TalkOriginsScraper.validate_export") as mocked_validate:
+        mocked_validate.return_value = __import__("citegeist").TalkOriginsValidationReport(
+            manifest_path=str(manifest),
+            topic_count=1,
+            entry_count=2,
+            parsed_ratio=1.0,
+            missing_author_count=0,
+            missing_title_count=0,
+            missing_year_count=0,
+            suspicious_entry_type_count=0,
+            suspicious_examples=[],
+            duplicate_cluster_count=0,
+            duplicate_entry_count=0,
+            duplicate_examples=[],
+        )
+        exit_code = main(["validate-talkorigins", str(manifest)])
+
+    assert exit_code == 0
+
+
+def test_cli_suggest_talkorigins_phrases_writes_output(tmp_path):
+    from unittest.mock import patch
+
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    output = tmp_path / "phrases.json"
+    with patch("citegeist.cli.TalkOriginsScraper.suggest_topic_phrases") as mocked_suggest:
+        mocked_suggest.return_value = [
+            __import__("citegeist", fromlist=["TalkOriginsTopicPhraseSuggestion"]).TalkOriginsTopicPhraseSuggestion(
+                slug="abiogenesis",
+                topic="Abiogenesis",
+                entry_count=2,
+                suggested_phrase="Abiogenesis prebiotic chemistry ribozyme",
+                keywords=["prebiotic", "chemistry", "ribozyme"],
+                review_required=True,
+                review_reasons=["small_topic"],
+            )
+        ]
+        exit_code = main(
+            [
+                "suggest-talkorigins-phrases",
+                str(manifest),
+                "--topic",
+                "abiogenesis",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload[0]["slug"] == "abiogenesis"
+
+
+def test_cli_duplicates_talkorigins_accepts_manifest(tmp_path):
+    from unittest.mock import patch
+
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    with patch("citegeist.cli.TalkOriginsScraper.inspect_duplicate_clusters") as mocked_duplicates:
+        mocked_duplicates.return_value = [
+            __import__("citegeist.talkorigins", fromlist=["TalkOriginsDuplicateCluster"]).TalkOriginsDuplicateCluster(
+                key="smith|1999|duplicate paper",
+                count=2,
+                items=[
+                    {
+                        "citation_key": "dup1",
+                        "title": "Duplicate Paper",
+                        "author": "Smith, Jane",
+                        "year": "1999",
+                        "seed_bib": "a.bib",
+                        "topic": "Abiogenesis",
+                        "topic_slug": "abiogenesis",
+                    }
+                ],
+                canonical={
+                    "citation_key": "dup1",
+                    "entry_type": "article",
+                    "field_count": 3,
+                    "fields": {"title": "Duplicate Paper"},
+                    "weak_reasons": [],
+                },
+            )
+        ]
+        exit_code = main(
+            [
+                "duplicates-talkorigins",
+                str(manifest),
+                "--topic",
+                "abiogenesis",
+                "--match",
+                "duplicate",
+                "--preview",
+                "--weak-only",
+            ]
+        )
+
+    assert exit_code == 0
+
+
+def test_cli_ingest_talkorigins_accepts_manifest(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    with patch("citegeist.cli.TalkOriginsScraper.ingest_export") as mocked_ingest:
+        mocked_ingest.return_value = __import__("citegeist").TalkOriginsIngestReport(
+            manifest_path=str(manifest),
+            topic_count=1,
+            raw_entry_count=2,
+            stored_entry_count=1,
+            duplicate_cluster_count=1,
+            duplicate_entry_count=2,
+            canonicalized_count=1,
+        )
+        exit_code = main(["--db", str(database), "ingest-talkorigins", str(manifest)])
+
+    assert exit_code == 0
+
+
+def test_cli_enrich_talkorigins_accepts_manifest(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    with patch("citegeist.cli.TalkOriginsScraper.enrich_weak_canonicals") as mocked_enrich:
+        mocked_enrich.return_value = [
+            __import__("citegeist.talkorigins", fromlist=["TalkOriginsEnrichmentResult"]).TalkOriginsEnrichmentResult(
+                key="smith|1999|duplicate paper",
+                citation_key="dup1",
+                weak_reasons_before=["missing:doi"],
+                resolved=True,
+                applied=False,
+                source_label="crossref:search:Duplicate Paper",
+                weak_reasons_after=[],
+                conflicts=[],
+                error="",
+            )
+        ]
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "enrich-talkorigins",
+                str(manifest),
+                "--limit",
+                "5",
+                "--apply",
+                "--allow-unsafe-search-matches",
+            ]
+        )
+
+    assert exit_code == 0
+
+
+def test_cli_review_talkorigins_writes_output(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    manifest = tmp_path / "talkorigins_manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    output = tmp_path / "review.json"
+    with patch("citegeist.cli.TalkOriginsScraper.build_review_export") as mocked_review:
+        mocked_review.return_value = __import__("citegeist.talkorigins", fromlist=["TalkOriginsReviewExport"]).TalkOriginsReviewExport(
+            manifest_path=str(manifest),
+            item_count=1,
+            items=[{"key": "smith|1999|duplicate paper", "canonical": {}, "enrichment": {}}],
+        )
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "review-talkorigins",
+                str(manifest),
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert exit_code == 0
+    assert output.exists()
+
+
+def test_cli_apply_talkorigins_corrections_accepts_files(tmp_path):
+    from unittest.mock import patch
+
+    database = tmp_path / "library.sqlite3"
+    manifest = tmp_path / "talkorigins_manifest.json"
+    corrections = tmp_path / "corrections.json"
+    manifest.write_text("{}", encoding="utf-8")
+    corrections.write_text('{"corrections": []}', encoding="utf-8")
+    with patch("citegeist.cli.TalkOriginsScraper.apply_review_corrections") as mocked_apply:
+        mocked_apply.return_value = [
+            __import__("citegeist.talkorigins", fromlist=["TalkOriginsCorrectionResult"]).TalkOriginsCorrectionResult(
+                key="smith|1999|duplicate paper",
+                citation_key="dup1",
+                applied=True,
+                error="",
+            )
+        ]
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "apply-talkorigins-corrections",
+                str(manifest),
+                str(corrections),
+            ]
+        )
+
+    assert exit_code == 0
+
+
+def test_cli_topics_and_topic_entries(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    topics = run_cli(tmp_path, "topics")
+    assert topics.returncode == 0
+    topics_payload = json.loads(topics.stdout)
+    assert topics_payload[0]["slug"] == "graph-methods"
+
+    topic_entries = run_cli(tmp_path, "topic-entries", "graph-methods")
+    assert topic_entries.returncode == 0
+    topic_payload = json.loads(topic_entries.stdout)
+    assert topic_payload["topic"]["slug"] == "graph-methods"
+    assert topic_payload["entries"][0]["citation_key"] == "seed2024"
+
+
+def test_cli_can_set_topic_phrase(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    result = run_cli(tmp_path, "set-topic-phrase", "graph-methods", "graph networks biology")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["expansion_phrase"] == "graph networks biology"
+
+
+def test_cli_can_apply_topic_phrases_from_json(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    phrases_path = tmp_path / "phrases.json"
+    phrases_path.write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "graph-methods",
+                    "suggested_phrase": "graph networks biology",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_cli(tmp_path, "apply-topic-phrases", str(phrases_path))
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload[0]["applied"] is True
+
+    check = run_cli(tmp_path, "topics")
+    topics_payload = json.loads(check.stdout)
+    assert topics_payload[0]["expansion_phrase"] == "graph networks biology"
+
+
+def test_cli_can_stage_topic_phrases_from_json(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    phrases_path = tmp_path / "phrases.json"
+    phrases_path.write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "graph-methods",
+                    "suggested_phrase": "graph networks biology",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_cli(tmp_path, "stage-topic-phrases", str(phrases_path))
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload[0]["staged"] is True
+    assert payload[0]["phrase_review_status"] == "pending"
+
+    check = run_cli(tmp_path, "topics")
+    topics_payload = json.loads(check.stdout)
+    assert topics_payload[0]["suggested_phrase"] == "graph networks biology"
+    assert topics_payload[0]["expansion_phrase"] is None
+    assert topics_payload[0]["phrase_review_status"] == "pending"
+
+
+def test_cli_can_review_topic_phrase(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+    finally:
+        store.close()
+
+    result = run_cli(
+        tmp_path,
+        "review-topic-phrase",
+        "graph-methods",
+        "accepted",
+        "--notes",
+        "curated and approved",
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["suggested_phrase"] == "graph networks biology"
+    assert payload["expansion_phrase"] == "graph networks biology"
+    assert payload["phrase_review_status"] == "accepted"
+    assert payload["phrase_review_notes"] == "curated and approved"
+
+
+def test_cli_topics_can_filter_by_phrase_review_status(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.ensure_topic("abiogenesis", "Abiogenesis")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+        store.stage_topic_phrase_suggestion("abiogenesis", "abiogenesis life origin")
+        store.review_topic_phrase_suggestion("abiogenesis", "accepted")
+    finally:
+        store.close()
+
+    result = run_cli(tmp_path, "topics", "--phrase-review-status", "pending")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert [topic["slug"] for topic in payload] == ["graph-methods"]
+
+
+def test_cli_export_topic(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    export_path = tmp_path / "graph-methods.bib"
+    result = run_cli(tmp_path, "export-topic", "graph-methods", "--output", str(export_path))
+    assert result.returncode == 0
+    exported = export_path.read_text(encoding="utf-8")
+    assert "@article{seed2024," in exported
+
+
+def test_cli_search_can_filter_by_topic(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Graph Methods for Biology},
+  year = {2024},
+  abstract = {A graph methods paper.}
+}
+
+@article{other2023,
+  author = {Other, Bob},
+  title = {Graph Methods for Chemistry},
+  year = {2023},
+  abstract = {Another graph methods paper.}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="biology",
+            topic_name="Biology",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/biology",
+            source_label="topic-seed",
+        )
+        store.add_entry_topic(
+            "other2023",
+            topic_slug="chemistry",
+            topic_name="Chemistry",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/chemistry",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    search = run_cli(tmp_path, "search", "graph", "--topic", "biology")
+    assert search.returncode == 0
+    assert "seed2024" in search.stdout
+    assert "other2023" not in search.stdout
 
 
 def test_cli_graph_outputs_missing_targets(tmp_path: Path):
@@ -239,3 +1036,43 @@ def test_cli_expand_with_mocked_openalex(tmp_path: Path):
         )
 
     assert exit_code == 0
+
+
+def test_cli_expand_topic_with_mocked_expander(tmp_path: Path):
+    from citegeist.expand import TopicExpansionResult
+
+    with patch("citegeist.cli.TopicExpander.expand_topic") as mocked_expand:
+        mocked_expand.return_value = [
+            TopicExpansionResult(
+                topic_slug="abiogenesis",
+                source_citation_key="seed2024",
+                discovered_citation_key="discovered1",
+                discovered_title="Abiogenesis origin chemistry",
+                created_entry=True,
+                relation_type="cites",
+                source_label="openalex:cites:seed2024",
+                relevance_score=0.67,
+                meets_relevance_threshold=True,
+                assigned_to_topic=True,
+            )
+        ]
+        database = tmp_path / "library.sqlite3"
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "expand-topic",
+                "abiogenesis",
+                "--topic-phrase",
+                "abiogenesis origin chemistry",
+                "--seed-key",
+                "seed2024",
+                "--min-relevance",
+                "0.3",
+                "--preview",
+            ]
+        )
+
+    assert exit_code == 0
+    _, kwargs = mocked_expand.call_args
+    assert kwargs["preview_only"] is True
