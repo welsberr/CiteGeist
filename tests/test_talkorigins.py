@@ -5,8 +5,8 @@ from pathlib import Path
 
 from citegeist.batch import load_batch_jobs
 from citegeist.bibtex import BibEntry
+from citegeist.examples.talkorigins import TalkOriginsScraper, normalize_topic_entries
 from citegeist.storage import BibliographyStore
-from citegeist.talkorigins import TalkOriginsScraper, normalize_topic_entries
 
 
 INDEX_HTML = """

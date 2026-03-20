@@ -1,3 +1,10 @@
+"""TalkOrigins example implementation.
+
+This module backs the example-facing namespace at ``citegeist.examples.talkorigins``.
+New code should prefer importing from the examples namespace rather than treating
+TalkOrigins support as part of the core top-level package surface.
+"""
+
 from __future__ import annotations
 
 from collections import Counter

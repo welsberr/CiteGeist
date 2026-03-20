@@ -7,18 +7,6 @@ from .harvest import OaiMetadataFormat, OaiPmhHarvester, OaiSet
 from .resolve import MetadataResolver, merge_entries, merge_entries_with_conflicts
 from .sources import SourceClient
 from .storage import BibliographyStore
-from .talkorigins import (
-    TalkOriginsBatchExport,
-    TalkOriginsDuplicateCluster,
-    TalkOriginsEnrichmentResult,
-    TalkOriginsIngestReport,
-    TalkOriginsReviewExport,
-    TalkOriginsScraper,
-    TalkOriginsSeedSet,
-    TalkOriginsTopicPhraseSuggestion,
-    TalkOriginsTopic,
-    TalkOriginsValidationReport,
-)
 
 __all__ = [
     "BibEntry",
@@ -34,16 +22,6 @@ __all__ = [
     "OaiMetadataFormat",
     "OaiSet",
     "SourceClient",
-    "TalkOriginsBatchExport",
-    "TalkOriginsDuplicateCluster",
-    "TalkOriginsEnrichmentResult",
-    "TalkOriginsIngestReport",
-    "TalkOriginsReviewExport",
-    "TalkOriginsScraper",
-    "TalkOriginsSeedSet",
-    "TalkOriginsTopicPhraseSuggestion",
-    "TalkOriginsTopic",
-    "TalkOriginsValidationReport",
     "extract_references",
     "load_batch_jobs",
     "merge_entries",

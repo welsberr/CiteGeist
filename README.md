@@ -56,10 +56,11 @@ The initial repo includes:
 - OAI-PMH repository discovery via `Identify`, `ListSets`, and `ListMetadataFormats` to target harvests more precisely;
 - bibliography bootstrap workflows that can start from a seed `.bib`, a topic phrase, or both;
 - batch bootstrap orchestration from JSON job files containing seed BibTeX paths, topic phrases, or both;
-- a TalkOrigins scraper that fixes repeated-author plaintext references, emits per-topic seed BibTeX files, and writes a batch JSON specification;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
+
+Example applications live alongside the core package rather than defining it. The current example corpus pipeline is the TalkOrigins bibliography workflow under [`citegeist.examples.talkorigins`](./src/citegeist/examples/talkorigins.py) with a usage guide in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
 
 The prioritized execution plan lives in [ROADMAP.md](./ROADMAP.md).
 
@@ -69,6 +70,7 @@ The prioritized execution plan lives in [ROADMAP.md](./ROADMAP.md).
 citegeist/
   src/citegeist/
     bibtex.py
+    examples/
     storage.py
   tests/
     test_storage.py
@@ -125,7 +127,6 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-confli
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 apply-conflict smith2024graphs title
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --seed-bib seed.bib --topic "bayesian nonparametrics"
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --topic "bayesian nonparametrics" --preview --topic-commit-limit 5
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 scrape-talkorigins talkorigins-out --limit-topics 5 --limit-entries-per-topic 20
 PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topics
@@ -143,42 +144,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --outpu
 
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
 
-For large legacy plaintext corpora such as the TalkOrigins bibliography, prefer a two-step workflow:
-
-1. `scrape-talkorigins` to generate cleaned per-topic `seed_bib` files plus a `talkorigins_jobs.json` batch spec.
-2. `bootstrap-batch` on that JSON file when you want to ingest, resolve, and expand from the generated seeds.
-
-The TalkOrigins scrape output now includes:
-
-- `seeds/*.bib` per-topic seed BibTeX files for `bootstrap-batch`
-- `plaintext/*.txt` per-topic cleaned GSA-style plaintext with repeated authors expanded
-- `site/topics/*.html` reconstructed topic pages with hide/show BibTeX blocks
-- `talkorigins_full.txt` and `talkorigins_full.bib` aggregate downloads
-- `snapshots/*.json` cached topic payloads so reruns can resume without re-fetching already scraped topics
-
-After a full scrape, run:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m citegeist validate-talkorigins talkorigins-out/talkorigins_manifest.json
-PYTHONPATH=src .venv/bin/python -m citegeist duplicates-talkorigins talkorigins-out/talkorigins_manifest.json --limit 20
-PYTHONPATH=src .venv/bin/python -m citegeist duplicates-talkorigins talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only
-PYTHONPATH=src .venv/bin/python -m citegeist suggest-talkorigins-phrases talkorigins-out/talkorigins_manifest.json --output topic-phrases.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 stage-topic-phrases topic-phrases.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic-phrase-reviews --output topic-phrase-review.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 review-topic-phrase abiogenesis accepted --notes "curated from local corpus"
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 review-topic-phrases topic-phrase-review.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 apply-topic-phrases topic-phrases.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 enrich-talkorigins talkorigins-out/talkorigins_manifest.json --limit 20
-PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins-copy.sqlite3 enrich-talkorigins talkorigins-out/talkorigins_manifest.json --limit 5 --apply --allow-unsafe-search-matches
-PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 review-talkorigins talkorigins-out/talkorigins_manifest.json --output talkorigins-review.json
-PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 apply-talkorigins-corrections talkorigins-out/talkorigins_manifest.json talkorigins-corrections.json
-```
-
-That report summarizes parse coverage and flags suspicious entry-type / venue combinations for manual cleanup.
-It also reports duplicate clusters across topic seed files so you can gauge how much deduplication pressure to expect before ingestion.
-Use `duplicates-talkorigins` when you want to inspect specific clusters, filter by text, restrict the audit to one topic slug, or preview only weak canonicalization outcomes before importing.
-
-Use `suggest-talkorigins-phrases` to derive candidate stored expansion phrases from the existing TalkOrigins topic corpus itself. The output is deterministic JSON keyed by topic slug, with a suggested phrase plus the extracted keywords that drove it. This is a useful first pass before setting topic phrases in the database or editing generated batch jobs.
+## Example Application
 
 Use `stage-topic-phrases` to load those suggestions into the database as review items. Staging stores the candidate in `suggested_phrase` and marks the topic `pending` without changing the active `expansion_phrase`.
 Use `export-topic-phrase-reviews` to write an editable JSON template directly from the database for the currently staged suggestions. That gives you a round-trip path from DB review queue to file edits and back into `review-topic-phrases`.
@@ -193,6 +159,22 @@ Use `expand-topic` when you already have both a topic phrase and a curated topic
 Use `set-topic-phrase` to store a curated expansion phrase on the topic itself. When a stored phrase exists, `expand-topic` will use it automatically if you do not pass `--topic-phrase`. Batch bootstrap jobs can also set `topic_slug`, `topic_name`, and `topic_phrase` so curated topic metadata is created as part of the run.
 Use `topics --phrase-review-status pending` when you want to audit only topics whose staged phrase suggestions still need review.
 `--allow-unsafe-search-matches` exists only for bounded experiments on copied databases when you explicitly want to relax trust to exercise downstream expansion behavior.
+
+The TalkOrigins corpus pipeline remains in the repository as an example application rather than a core package surface. Use the example-scoped Python namespace:
+
+```python
+from citegeist.examples.talkorigins import TalkOriginsScraper
+```
+
+and the example-scoped CLI commands:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-scrape talkorigins-out --limit-topics 5 --limit-entries-per-topic 20
+PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-validate talkorigins-out/talkorigins_manifest.json
+PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only
+```
+
+The older `scrape-talkorigins`-style command names remain available as compatibility aliases. The full example workflow and reconstruction notes live in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
 
 Correction files are simple JSON:
 
@@ -214,15 +196,6 @@ Correction files are simple JSON:
 ```
 
 `fields` values overwrite the canonical entry for that duplicate-cluster key. Set a field to `null` to remove it.
-
-To import the reconstructed corpus into SQLite while collapsing duplicate works across topics into canonical entries:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 ingest-talkorigins talkorigins-out/talkorigins_manifest.json
-```
-
-That import preserves many-to-many topic membership through the `topics` and `entry_topics` tables.
-After import, use `topics`, `topic-entries`, `search --topic`, and `export-topic` to inspect or export topic slices from the consolidated database.
 
 Live-source workflow:
 

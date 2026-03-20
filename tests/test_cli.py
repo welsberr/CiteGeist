@@ -7,6 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from citegeist.cli import main
+from citegeist.examples.talkorigins import (
+    TalkOriginsBatchExport,
+    TalkOriginsCorrectionResult,
+    TalkOriginsDuplicateCluster,
+    TalkOriginsEnrichmentResult,
+    TalkOriginsIngestReport,
+    TalkOriginsReviewExport,
+    TalkOriginsTopicPhraseSuggestion,
+    TalkOriginsValidationReport,
+)
 
 
 SAMPLE_BIB = """
@@ -313,7 +323,7 @@ def test_cli_scrape_talkorigins_accepts_output_dir(tmp_path):
 
     database = tmp_path / "library.sqlite3"
     with patch("citegeist.cli.TalkOriginsScraper.scrape_to_directory") as mocked_scrape:
-        mocked_scrape.return_value = __import__("citegeist").TalkOriginsBatchExport(
+        mocked_scrape.return_value = TalkOriginsBatchExport(
             base_url="https://www.talkorigins.org/origins/biblio/",
             output_dir=str(tmp_path),
             topic_count=1,
@@ -326,7 +336,7 @@ def test_cli_scrape_talkorigins_accepts_output_dir(tmp_path):
             [
                 "--db",
                 str(database),
-                "scrape-talkorigins",
+                "example-talkorigins-scrape",
                 str(tmp_path / "talkorigins-out"),
                 "--limit-topics",
                 "3",
@@ -346,7 +356,7 @@ def test_cli_validate_talkorigins_accepts_manifest(tmp_path):
     manifest = tmp_path / "talkorigins_manifest.json"
     manifest.write_text("{}", encoding="utf-8")
     with patch("citegeist.cli.TalkOriginsScraper.validate_export") as mocked_validate:
-        mocked_validate.return_value = __import__("citegeist").TalkOriginsValidationReport(
+        mocked_validate.return_value = TalkOriginsValidationReport(
             manifest_path=str(manifest),
             topic_count=1,
             entry_count=2,
@@ -360,7 +370,7 @@ def test_cli_validate_talkorigins_accepts_manifest(tmp_path):
             duplicate_entry_count=0,
             duplicate_examples=[],
         )
-        exit_code = main(["validate-talkorigins", str(manifest)])
+        exit_code = main(["example-talkorigins-validate", str(manifest)])
 
     assert exit_code == 0
 
@@ -373,7 +383,7 @@ def test_cli_suggest_talkorigins_phrases_writes_output(tmp_path):
     output = tmp_path / "phrases.json"
     with patch("citegeist.cli.TalkOriginsScraper.suggest_topic_phrases") as mocked_suggest:
         mocked_suggest.return_value = [
-            __import__("citegeist", fromlist=["TalkOriginsTopicPhraseSuggestion"]).TalkOriginsTopicPhraseSuggestion(
+            TalkOriginsTopicPhraseSuggestion(
                 slug="abiogenesis",
                 topic="Abiogenesis",
                 entry_count=2,
@@ -385,7 +395,7 @@ def test_cli_suggest_talkorigins_phrases_writes_output(tmp_path):
         ]
         exit_code = main(
             [
-                "suggest-talkorigins-phrases",
+                "example-talkorigins-suggest-phrases",
                 str(manifest),
                 "--topic",
                 "abiogenesis",
@@ -406,7 +416,7 @@ def test_cli_duplicates_talkorigins_accepts_manifest(tmp_path):
     manifest.write_text("{}", encoding="utf-8")
     with patch("citegeist.cli.TalkOriginsScraper.inspect_duplicate_clusters") as mocked_duplicates:
         mocked_duplicates.return_value = [
-            __import__("citegeist.talkorigins", fromlist=["TalkOriginsDuplicateCluster"]).TalkOriginsDuplicateCluster(
+            TalkOriginsDuplicateCluster(
                 key="smith|1999|duplicate paper",
                 count=2,
                 items=[
@@ -431,7 +441,7 @@ def test_cli_duplicates_talkorigins_accepts_manifest(tmp_path):
         ]
         exit_code = main(
             [
-                "duplicates-talkorigins",
+                "example-talkorigins-duplicates",
                 str(manifest),
                 "--topic",
                 "abiogenesis",
@@ -452,7 +462,7 @@ def test_cli_ingest_talkorigins_accepts_manifest(tmp_path):
     manifest = tmp_path / "talkorigins_manifest.json"
     manifest.write_text("{}", encoding="utf-8")
     with patch("citegeist.cli.TalkOriginsScraper.ingest_export") as mocked_ingest:
-        mocked_ingest.return_value = __import__("citegeist").TalkOriginsIngestReport(
+        mocked_ingest.return_value = TalkOriginsIngestReport(
             manifest_path=str(manifest),
             topic_count=1,
             raw_entry_count=2,
@@ -461,7 +471,7 @@ def test_cli_ingest_talkorigins_accepts_manifest(tmp_path):
             duplicate_entry_count=2,
             canonicalized_count=1,
         )
-        exit_code = main(["--db", str(database), "ingest-talkorigins", str(manifest)])
+        exit_code = main(["--db", str(database), "example-talkorigins-ingest", str(manifest)])
 
     assert exit_code == 0
 
@@ -474,7 +484,7 @@ def test_cli_enrich_talkorigins_accepts_manifest(tmp_path):
     manifest.write_text("{}", encoding="utf-8")
     with patch("citegeist.cli.TalkOriginsScraper.enrich_weak_canonicals") as mocked_enrich:
         mocked_enrich.return_value = [
-            __import__("citegeist.talkorigins", fromlist=["TalkOriginsEnrichmentResult"]).TalkOriginsEnrichmentResult(
+            TalkOriginsEnrichmentResult(
                 key="smith|1999|duplicate paper",
                 citation_key="dup1",
                 weak_reasons_before=["missing:doi"],
@@ -490,7 +500,7 @@ def test_cli_enrich_talkorigins_accepts_manifest(tmp_path):
             [
                 "--db",
                 str(database),
-                "enrich-talkorigins",
+                "example-talkorigins-enrich",
                 str(manifest),
                 "--limit",
                 "5",
@@ -510,7 +520,7 @@ def test_cli_review_talkorigins_writes_output(tmp_path):
     manifest.write_text("{}", encoding="utf-8")
     output = tmp_path / "review.json"
     with patch("citegeist.cli.TalkOriginsScraper.build_review_export") as mocked_review:
-        mocked_review.return_value = __import__("citegeist.talkorigins", fromlist=["TalkOriginsReviewExport"]).TalkOriginsReviewExport(
+        mocked_review.return_value = TalkOriginsReviewExport(
             manifest_path=str(manifest),
             item_count=1,
             items=[{"key": "smith|1999|duplicate paper", "canonical": {}, "enrichment": {}}],
@@ -519,7 +529,7 @@ def test_cli_review_talkorigins_writes_output(tmp_path):
             [
                 "--db",
                 str(database),
-                "review-talkorigins",
+                "example-talkorigins-review",
                 str(manifest),
                 "--output",
                 str(output),
@@ -540,7 +550,7 @@ def test_cli_apply_talkorigins_corrections_accepts_files(tmp_path):
     corrections.write_text('{"corrections": []}', encoding="utf-8")
     with patch("citegeist.cli.TalkOriginsScraper.apply_review_corrections") as mocked_apply:
         mocked_apply.return_value = [
-            __import__("citegeist.talkorigins", fromlist=["TalkOriginsCorrectionResult"]).TalkOriginsCorrectionResult(
+            TalkOriginsCorrectionResult(
                 key="smith|1999|duplicate paper",
                 citation_key="dup1",
                 applied=True,
@@ -551,7 +561,7 @@ def test_cli_apply_talkorigins_corrections_accepts_files(tmp_path):
             [
                 "--db",
                 str(database),
-                "apply-talkorigins-corrections",
+                "example-talkorigins-apply-corrections",
                 str(manifest),
                 str(corrections),
             ]

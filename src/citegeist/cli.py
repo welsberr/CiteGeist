@@ -9,12 +9,12 @@ from pathlib import Path
 from .batch import BatchBootstrapRunner, load_batch_jobs
 from .bibtex import parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
+from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander
 from .extract import extract_references
 from .harvest import OaiPmhHarvester
 from .resolve import MetadataResolver, merge_entries_with_conflicts
 from .storage import BibliographyStore
-from .talkorigins import TalkOriginsScraper
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -205,8 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("input", help="Path to batch JSON file")
 
     talkorigins_parser = subparsers.add_parser(
-        "scrape-talkorigins",
-        help="Scrape TalkOrigins into per-topic seed BibTeX files and a bootstrap-batch JSON file",
+        "example-talkorigins-scrape",
+        aliases=["scrape-talkorigins"],
+        help="Example workflow: scrape TalkOrigins into per-topic seed BibTeX files and a bootstrap-batch JSON file",
     )
     talkorigins_parser.add_argument(
         "output_dir",
@@ -257,14 +258,16 @@ def build_parser() -> argparse.ArgumentParser:
     talkorigins_parser.add_argument("--status", default="draft", help="Review status for generated seed jobs")
 
     validate_talkorigins_parser = subparsers.add_parser(
-        "validate-talkorigins",
-        help="Validate a generated TalkOrigins manifest and report parse coverage and suspicious entries",
+        "example-talkorigins-validate",
+        aliases=["validate-talkorigins"],
+        help="Example workflow: validate a generated TalkOrigins manifest and report parse coverage and suspicious entries",
     )
     validate_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
 
     suggest_talkorigins_parser = subparsers.add_parser(
-        "suggest-talkorigins-phrases",
-        help="Suggest stored topic expansion phrases from a TalkOrigins manifest",
+        "example-talkorigins-suggest-phrases",
+        aliases=["suggest-talkorigins-phrases"],
+        help="Example workflow: suggest stored topic expansion phrases from a TalkOrigins manifest",
     )
     suggest_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     suggest_talkorigins_parser.add_argument("--topic", help="Optional topic slug to restrict suggestions")
@@ -305,8 +308,9 @@ def build_parser() -> argparse.ArgumentParser:
     review_topic_phrases_parser.add_argument("input", help="Path to JSON file containing topic phrase review records")
 
     duplicates_talkorigins_parser = subparsers.add_parser(
-        "duplicates-talkorigins",
-        help="Inspect duplicate clusters in a generated TalkOrigins manifest",
+        "example-talkorigins-duplicates",
+        aliases=["duplicates-talkorigins"],
+        help="Example workflow: inspect duplicate clusters in a generated TalkOrigins manifest",
     )
     duplicates_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     duplicates_talkorigins_parser.add_argument("--limit", type=int, default=20, help="Maximum clusters to show")
@@ -330,8 +334,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ingest_talkorigins_parser = subparsers.add_parser(
-        "ingest-talkorigins",
-        help="Ingest a TalkOrigins manifest into the database with duplicate consolidation and topic membership",
+        "example-talkorigins-ingest",
+        aliases=["ingest-talkorigins"],
+        help="Example workflow: ingest a TalkOrigins manifest into the database with duplicate consolidation and topic membership",
     )
     ingest_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     ingest_talkorigins_parser.add_argument("--status", default="draft", help="Review status for imported entries")
@@ -342,8 +347,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     enrich_talkorigins_parser = subparsers.add_parser(
-        "enrich-talkorigins",
-        help="Attempt metadata enrichment for weak TalkOrigins canonical entries",
+        "example-talkorigins-enrich",
+        aliases=["enrich-talkorigins"],
+        help="Example workflow: attempt metadata enrichment for weak TalkOrigins canonical entries",
     )
     enrich_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     enrich_talkorigins_parser.add_argument("--limit", type=int, default=20, help="Maximum weak clusters to inspect")
@@ -372,8 +378,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     review_talkorigins_parser = subparsers.add_parser(
-        "review-talkorigins",
-        help="Export weak TalkOrigins clusters plus dry-run enrichment outcomes for manual review",
+        "example-talkorigins-review",
+        aliases=["review-talkorigins"],
+        help="Example workflow: export weak TalkOrigins clusters plus dry-run enrichment outcomes for manual review",
     )
     review_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     review_talkorigins_parser.add_argument("--limit", type=int, default=20, help="Maximum weak clusters to export")
@@ -388,8 +395,9 @@ def build_parser() -> argparse.ArgumentParser:
     review_talkorigins_parser.add_argument("--output", help="Write review export JSON to a file instead of stdout")
 
     apply_review_talkorigins_parser = subparsers.add_parser(
-        "apply-talkorigins-corrections",
-        help="Apply curated TalkOrigins review corrections to the consolidated database",
+        "example-talkorigins-apply-corrections",
+        aliases=["apply-talkorigins-corrections"],
+        help="Example workflow: apply curated TalkOrigins review corrections to the consolidated database",
     )
     apply_review_talkorigins_parser.add_argument("manifest", help="Path to talkorigins_manifest.json")
     apply_review_talkorigins_parser.add_argument("corrections", help="Path to corrections JSON")
@@ -530,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "bootstrap-batch":
             return _run_bootstrap_batch(store, Path(args.input))
-        if args.command == "scrape-talkorigins":
+        if args.command in {"example-talkorigins-scrape", "scrape-talkorigins"}:
             return _run_scrape_talkorigins(
                 store,
                 args.base_url,
@@ -545,9 +553,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.topic_commit_limit,
                 args.status,
             )
-        if args.command == "validate-talkorigins":
+        if args.command in {"example-talkorigins-validate", "validate-talkorigins"}:
             return _run_validate_talkorigins(Path(args.manifest))
-        if args.command == "suggest-talkorigins-phrases":
+        if args.command in {"example-talkorigins-suggest-phrases", "suggest-talkorigins-phrases"}:
             return _run_suggest_talkorigins_phrases(Path(args.manifest), args.topic, args.limit, args.output)
         if args.command == "apply-topic-phrases":
             return _run_apply_topic_phrases(store, Path(args.input))
@@ -557,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
             return _run_review_topic_phrase(store, args.topic_slug, args.status, args.notes, args.phrase)
         if args.command == "review-topic-phrases":
             return _run_review_topic_phrases(store, Path(args.input))
-        if args.command == "duplicates-talkorigins":
+        if args.command in {"example-talkorigins-duplicates", "duplicates-talkorigins"}:
             return _run_duplicates_talkorigins(
                 Path(args.manifest),
                 args.limit,
@@ -567,9 +575,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.preview,
                 args.weak_only,
             )
-        if args.command == "ingest-talkorigins":
+        if args.command in {"example-talkorigins-ingest", "ingest-talkorigins"}:
             return _run_ingest_talkorigins(store, Path(args.manifest), args.status, not args.no_dedupe)
-        if args.command == "enrich-talkorigins":
+        if args.command in {"example-talkorigins-enrich", "enrich-talkorigins"}:
             return _run_enrich_talkorigins(
                 store,
                 Path(args.manifest),
@@ -581,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.status,
                 args.allow_unsafe_search_matches,
             )
-        if args.command == "review-talkorigins":
+        if args.command in {"example-talkorigins-review", "review-talkorigins"}:
             return _run_review_talkorigins(
                 store,
                 Path(args.manifest),
@@ -591,7 +599,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.topic,
                 args.output,
             )
-        if args.command == "apply-talkorigins-corrections":
+        if args.command in {"example-talkorigins-apply-corrections", "apply-talkorigins-corrections"}:
             return _run_apply_talkorigins_corrections(
                 store,
                 Path(args.manifest),
