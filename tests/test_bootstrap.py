@@ -87,6 +87,44 @@ def test_bootstrap_cli_accepts_seed_and_topic(tmp_path):
     assert exit_code == 0
 
 
+def test_bootstrap_cli_preview_outputs_candidate_metadata(tmp_path, capsys):
+    from unittest.mock import patch
+    from citegeist.bootstrap import BootstrapResult
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.Bootstrapper.bootstrap") as mocked_bootstrap:
+        mocked_bootstrap.return_value = [
+            BootstrapResult(
+                citation_key="openalexw123",
+                origin="topic",
+                created=True,
+                score=4.0,
+                title="Artificial Life and Adaptive Behavior",
+                author="Langton, Christopher G.",
+                year="1989",
+                abstract="A foundational overview of artificial life systems.",
+            )
+        ]
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "bootstrap",
+                "--topic",
+                "artificial life",
+                "--preview",
+                "--topic-commit-limit",
+                "50",
+            ]
+        )
+
+    assert exit_code == 0
+    payload = capsys.readouterr().out
+    assert "Artificial Life and Adaptive Behavior" in payload
+    assert "Langton, Christopher G." in payload
+    assert "A foundational overview of artificial life systems." in payload
+
+
 def test_bootstrap_ranks_and_deduplicates_topic_candidates():
     store = BibliographyStore()
     try:
@@ -140,6 +178,7 @@ def test_bootstrap_preview_does_not_write_to_database():
         results = bootstrapper.bootstrap(store, topic="graph topic", expand=False, preview_only=True)
 
         assert [item.citation_key for item in results] == ["preview2024graph"]
+        assert results[0].title == "Preview Graph Topic"
         assert store.get_entry("preview2024graph") is None
     finally:
         store.close()
@@ -171,5 +210,52 @@ def test_bootstrap_topic_commit_limit_restricts_persisted_candidates():
         assert [item.citation_key for item in results if item.origin == "topic"] == ["rank1"]
         assert store.get_entry("rank1") is not None
         assert store.get_entry("rank2") is None
+    finally:
+        store.close()
+
+
+def test_bootstrap_preview_uses_topic_commit_limit_when_larger_than_topic_limit():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(
+                entry_type="article",
+                citation_key=f"rank{index}",
+                fields={
+                    "title": f"Preview Topic Result {index}",
+                    "author": f"Author, {index}",
+                    "year": f"20{index:02d}",
+                    "abstract": f"Abstract {index}",
+                },
+            )
+            for index in range(1, 8)
+        ][:limit]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(
+            store,
+            topic="graph topic",
+            expand=False,
+            preview_only=True,
+            topic_limit=5,
+            topic_commit_limit=7,
+        )
+
+        assert [item.citation_key for item in results] == [
+            "rank1",
+            "rank2",
+            "rank3",
+            "rank4",
+            "rank5",
+            "rank6",
+            "rank7",
+        ]
+        assert results[0].author == "Author, 1"
+        assert results[0].year == "2001"
+        assert results[0].abstract == "Abstract 1"
     finally:
         store.close()

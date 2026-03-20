@@ -15,6 +15,10 @@ class BootstrapResult:
     origin: str
     created: bool
     score: float = 0.0
+    title: str = ""
+    author: str = ""
+    year: str = ""
+    abstract: str = ""
 
 
 class Bootstrapper:
@@ -57,7 +61,17 @@ class Bootstrapper:
                         review_status=review_status,
                     )
                     seed_keys.append(entry.citation_key)
-                results.append(BootstrapResult(entry.citation_key, "seed_bibtex", created))
+                results.append(
+                    BootstrapResult(
+                        entry.citation_key,
+                        "seed_bibtex",
+                        created,
+                        title=entry.fields.get("title", ""),
+                        author=entry.fields.get("author", ""),
+                        year=entry.fields.get("year", ""),
+                        abstract=entry.fields.get("abstract", ""),
+                    )
+                )
 
         if topic:
             if not preview_only and (topic_slug or topic_name or topic_phrase):
@@ -67,7 +81,8 @@ class Bootstrapper:
                     source_type="bootstrap",
                     expansion_phrase=topic_phrase or topic,
                 )
-            ranked_candidates = self._topic_candidates(topic, seed_keys, topic_limit)
+            candidate_limit = max(topic_limit, topic_commit_limit or 0)
+            ranked_candidates = self._topic_candidates(topic, seed_keys, candidate_limit)
             if topic_commit_limit is not None:
                 ranked_candidates = ranked_candidates[:topic_commit_limit]
 
@@ -82,7 +97,18 @@ class Bootstrapper:
                         review_status=review_status,
                     )
                     seed_keys.append(entry.citation_key)
-                results.append(BootstrapResult(entry.citation_key, "topic", created, score=score))
+                results.append(
+                    BootstrapResult(
+                        entry.citation_key,
+                        "topic",
+                        created,
+                        score=score,
+                        title=entry.fields.get("title", ""),
+                        author=entry.fields.get("author", ""),
+                        year=entry.fields.get("year", ""),
+                        abstract=entry.fields.get("abstract", ""),
+                    )
+                )
 
         if expand and not preview_only:
             expanded_keys = list(dict.fromkeys(seed_keys))
