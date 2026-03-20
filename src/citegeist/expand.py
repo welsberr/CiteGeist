@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
 from .bibtex import BibEntry, parse_bibtex
-from .resolve import MetadataResolver
+from .resolve import MetadataResolver, merge_entries
 from .storage import BibliographyStore
 
 
@@ -55,7 +55,7 @@ class CrossrefExpander:
         references = payload.get("message", {}).get("reference", [])
         results: list[ExpansionResult] = []
         for index, reference in enumerate(references, start=1):
-            discovered = _crossref_reference_to_entry(reference, citation_key, index)
+            discovered = self._reference_to_entry(reference, citation_key, index)
             created = False
             if store.get_entry(discovered.citation_key) is None:
                 store.upsert_entry(
@@ -86,6 +86,26 @@ class CrossrefExpander:
                 )
             )
         return results
+
+    def _reference_to_entry(self, reference: dict, source_citation_key: str, ordinal: int) -> BibEntry:
+        fallback = _crossref_reference_to_entry(reference, source_citation_key, ordinal)
+        doi = reference.get("DOI") or ""
+        if not doi:
+            return fallback
+
+        resolution = self.resolver.resolve_doi(doi)
+        if resolution is None:
+            resolution = self.resolver.resolve_datacite_doi(doi)
+        if resolution is None:
+            return fallback
+
+        merged = merge_entries(resolution.entry, fallback)
+        merged.fields["note"] = fallback.fields["note"]
+        return BibEntry(
+            entry_type=resolution.entry.entry_type or merged.entry_type,
+            citation_key=fallback.citation_key,
+            fields=merged.fields,
+        )
 
 
 class OpenAlexExpander:
@@ -312,7 +332,7 @@ class TopicExpander:
         references = payload.get("message", {}).get("reference", [])[:limit]
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for index, reference in enumerate(references, start=1):
-            discovered = _crossref_reference_to_entry(reference, citation_key, index)
+            discovered = self.crossref_expander._reference_to_entry(reference, citation_key, index)
             rows.append(
                 (
                     ExpansionResult(
@@ -391,7 +411,7 @@ def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordi
         fields["journal"] = _normalize_text(journal_title)
 
     citation_key = _reference_citation_key(reference, title, year, ordinal)
-    entry_type = "article" if journal_title else "misc"
+    entry_type = _crossref_reference_entry_type(reference, title, journal_title)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
 
 
@@ -409,6 +429,24 @@ def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int
 
 def _normalize_text(value: str) -> str:
     return " ".join(value.split())
+
+
+def _crossref_reference_entry_type(reference: dict, title: str, journal_title: str) -> str:
+    if journal_title:
+        return "article"
+    combined = " ".join(
+        str(reference.get(field) or "")
+        for field in ("article-title", "volume-title", "journal-title", "series-title", "unstructured")
+    ).casefold()
+    if any(token in combined for token in ("conference", "proceedings", "symposium", "workshop")):
+        return "inproceedings"
+    if any(token in combined for token in ("thesis", "dissertation")):
+        return "phdthesis"
+    if reference.get("volume-title"):
+        return "incollection"
+    if any(token in combined for token in ("press", "publisher", "edition")):
+        return "book"
+    return "misc"
 
 
 def _topic_relevance_score(topic_phrase: str, entry: dict[str, object] | None) -> float:
