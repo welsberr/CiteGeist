@@ -46,6 +46,11 @@ The initial repo includes:
 - `pybtex`-backed BibTeX parsing and export in a repo-local virtual environment;
 - a SQLite-backed bibliography store;
 - a small CLI for ingest, search, inspection, and export;
+- review-state tracking on entries and per-field ingest provenance;
+- first-pass plaintext reference extraction into draft BibTeX;
+- identifier-first metadata resolution for DOI, DBLP, and arXiv-backed entries;
+- local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
+- Crossref-backed graph expansion that materializes draft referenced works and edge provenance;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
@@ -106,15 +111,19 @@ Or use the CLI directly:
 cd citegeist
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 ingest references.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 search "semantic search"
-PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 show smith2024graphs
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 show --provenance smith2024graphs
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 set-status smith2024graphs reviewed
+PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith2024graphs --relation cites --depth 2 --missing-only
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 expand smith2024graphs --source crossref
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --output reviewed.bib
 ```
 
 ## Near-Term Priorities
 
-- provenance tracking and entry review states;
-- plaintext reference extraction into draft BibTeX;
-- metadata resolvers for DOI, Crossref, DBLP, and arXiv.
+- stronger plaintext extraction coverage for more citation styles;
+- richer graph expansion from additional external citation sources.
 
 See [ROADMAP.md](./ROADMAP.md) for the prioritized phase plan and rationale.
 

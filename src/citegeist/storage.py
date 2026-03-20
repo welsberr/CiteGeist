@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import deque
 from collections import OrderedDict
 from pathlib import Path
 
@@ -47,6 +48,7 @@ class BibliographyStore:
                 id INTEGER PRIMARY KEY,
                 citation_key TEXT NOT NULL UNIQUE,
                 entry_type TEXT NOT NULL,
+                review_status TEXT NOT NULL DEFAULT 'draft',
                 title TEXT,
                 year TEXT,
                 journal TEXT,
@@ -92,8 +94,33 @@ class BibliographyStore:
                 relation_type TEXT NOT NULL,
                 PRIMARY KEY (source_entry_id, target_citation_key, relation_type)
             );
+
+            CREATE TABLE IF NOT EXISTS field_provenance (
+                id INTEGER PRIMARY KEY,
+                entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                field_name TEXT NOT NULL,
+                field_value TEXT,
+                source_type TEXT NOT NULL,
+                source_label TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                confidence REAL,
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS relation_provenance (
+                id INTEGER PRIMARY KEY,
+                source_entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+                target_citation_key TEXT NOT NULL,
+                relation_type TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_label TEXT NOT NULL,
+                confidence REAL,
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
+
+        self._ensure_entry_columns()
 
         if self._fts5_enabled:
             self.connection.execute(
@@ -109,24 +136,45 @@ class BibliographyStore:
             )
         self.connection.commit()
 
-    def ingest_bibtex(self, text: str, fulltext_by_key: dict[str, str] | None = None) -> list[str]:
+    def ingest_bibtex(
+        self,
+        text: str,
+        fulltext_by_key: dict[str, str] | None = None,
+        source_label: str = "bibtex_import",
+        review_status: str = "draft",
+    ) -> list[str]:
         fulltext_by_key = fulltext_by_key or {}
         entries = parse_bibtex(text)
         keys: list[str] = []
         for entry in entries:
             fulltext = fulltext_by_key.get(entry.citation_key)
-            self.upsert_entry(entry, fulltext=fulltext, raw_bibtex=_entry_to_bibtex(entry))
+            self.upsert_entry(
+                entry,
+                fulltext=fulltext,
+                raw_bibtex=_entry_to_bibtex(entry),
+                source_type="bibtex",
+                source_label=source_label,
+                review_status=review_status,
+            )
             keys.append(entry.citation_key)
         self.connection.commit()
         return keys
 
-    def upsert_entry(self, entry: BibEntry, fulltext: str | None = None, raw_bibtex: str | None = None) -> int:
+    def upsert_entry(
+        self,
+        entry: BibEntry,
+        fulltext: str | None = None,
+        raw_bibtex: str | None = None,
+        source_type: str = "manual",
+        source_label: str = "manual",
+        review_status: str = "draft",
+    ) -> int:
         row = self.connection.execute(
             """
             INSERT INTO entries (
-                citation_key, entry_type, title, year, journal, booktitle, publisher,
+                citation_key, entry_type, review_status, title, year, journal, booktitle, publisher,
                 abstract, keywords, url, doi, isbn, fulltext, raw_bibtex, extra_fields_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(citation_key) DO UPDATE SET
                 entry_type = excluded.entry_type,
                 title = excluded.title,
@@ -148,6 +196,7 @@ class BibliographyStore:
             (
                 entry.citation_key,
                 entry.entry_type,
+                review_status,
                 entry.fields.get("title"),
                 entry.fields.get("year"),
                 entry.fields.get("journal"),
@@ -164,6 +213,15 @@ class BibliographyStore:
             ),
         ).fetchone()
         entry_id = int(row["id"])
+
+        self._record_field_provenance(
+            entry_id=entry_id,
+            entry=entry,
+            source_type=source_type,
+            source_label=source_label,
+            operation="upsert",
+            fulltext=fulltext,
+        )
 
         self.connection.execute("DELETE FROM entry_creators WHERE entry_id = ?", (entry_id,))
         for role in ("author", "editor"):
@@ -262,6 +320,64 @@ class BibliographyStore:
         ).fetchall()
         return [str(row["target_citation_key"]) for row in rows]
 
+    def traverse_graph(
+        self,
+        seed_keys: list[str],
+        relation_types: list[str] | None = None,
+        max_depth: int = 1,
+        review_status: str | None = None,
+        include_missing: bool = True,
+    ) -> list[dict[str, object]]:
+        relation_types = relation_types or ["cites"]
+        allowed_relations = set(relation_types)
+        visited: dict[str, int] = {}
+        queue: deque[tuple[str, int]] = deque()
+
+        for seed_key in seed_keys:
+            queue.append((seed_key, 0))
+            visited[seed_key] = 0
+
+        results: list[dict[str, object]] = []
+        while queue:
+            citation_key, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+
+            for edge in self._iter_graph_edges(citation_key, allowed_relations):
+                target_key = str(edge["target_citation_key"])
+                target_entry = self.get_entry(target_key)
+                target_status = target_entry.get("review_status") if target_entry else None
+
+                if review_status is not None and target_status != review_status:
+                    if target_entry is not None or not include_missing:
+                        continue
+
+                next_depth = depth + 1
+                result = {
+                    "source_citation_key": citation_key,
+                    "target_citation_key": target_key,
+                    "relation_type": str(edge["relation_type"]),
+                    "depth": next_depth,
+                    "target_exists": target_entry is not None,
+                    "target_review_status": target_status,
+                    "target_title": target_entry.get("title") if target_entry else None,
+                }
+                results.append(result)
+
+                if target_entry is not None and (target_key not in visited or next_depth < visited[target_key]):
+                    visited[target_key] = next_depth
+                    queue.append((target_key, next_depth))
+
+        results.sort(
+            key=lambda row: (
+                int(row["depth"]),
+                str(row["relation_type"]),
+                str(row["source_citation_key"]),
+                str(row["target_citation_key"]),
+            )
+        )
+        return results
+
     def get_entry(self, citation_key: str) -> dict[str, object] | None:
         row = self.connection.execute(
             "SELECT * FROM entries WHERE citation_key = ?",
@@ -272,12 +388,115 @@ class BibliographyStore:
     def list_entries(self, limit: int = 50) -> list[dict[str, object]]:
         rows = self.connection.execute(
             """
-            SELECT citation_key, entry_type, title, year
+            SELECT citation_key, entry_type, review_status, title, year
             FROM entries
             ORDER BY COALESCE(year, ''), citation_key
             LIMIT ?
             """,
             (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_entry_status(self, citation_key: str, review_status: str) -> bool:
+        row = self.connection.execute(
+            """
+            UPDATE entries
+            SET review_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE citation_key = ?
+            RETURNING id
+            """,
+            (review_status, citation_key),
+        ).fetchone()
+        self.connection.commit()
+        return row is not None
+
+    def replace_entry(
+        self,
+        citation_key: str,
+        entry: BibEntry,
+        source_type: str,
+        source_label: str,
+        review_status: str = "enriched",
+    ) -> bool:
+        existing = self.get_entry(citation_key)
+        if existing is None:
+            return False
+        replacement = BibEntry(
+            entry_type=entry.entry_type,
+            citation_key=citation_key,
+            fields=entry.fields,
+        )
+        self.upsert_entry(
+            replacement,
+            fulltext=existing.get("fulltext"),
+            raw_bibtex=_entry_to_bibtex(replacement),
+            source_type=source_type,
+            source_label=source_label,
+            review_status=review_status,
+        )
+        self.connection.commit()
+        return True
+
+    def add_relation(
+        self,
+        source_citation_key: str,
+        target_citation_key: str,
+        relation_type: str,
+        source_type: str,
+        source_label: str,
+        confidence: float = 1.0,
+    ) -> bool:
+        row = self.connection.execute(
+            "SELECT id FROM entries WHERE citation_key = ?",
+            (source_citation_key,),
+        ).fetchone()
+        if row is None:
+            return False
+
+        source_entry_id = int(row["id"])
+        self.connection.execute(
+            """
+            INSERT OR IGNORE INTO relations (source_entry_id, target_citation_key, relation_type)
+            VALUES (?, ?, ?)
+            """,
+            (source_entry_id, target_citation_key, relation_type),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO relation_provenance (
+                source_entry_id, target_citation_key, relation_type, source_type, source_label, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (source_entry_id, target_citation_key, relation_type, source_type, source_label, confidence),
+        )
+        self.connection.commit()
+        return True
+
+    def get_field_provenance(self, citation_key: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT fp.field_name, fp.field_value, fp.source_type, fp.source_label,
+                   fp.operation, fp.confidence, fp.recorded_at
+            FROM field_provenance fp
+            JOIN entries e ON e.id = fp.entry_id
+            WHERE e.citation_key = ?
+            ORDER BY fp.recorded_at, fp.id
+            """,
+            (citation_key,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_relation_provenance(self, citation_key: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT rp.target_citation_key, rp.relation_type, rp.source_type, rp.source_label,
+                   rp.confidence, rp.recorded_at
+            FROM relation_provenance rp
+            JOIN entries e ON e.id = rp.source_entry_id
+            WHERE e.citation_key = ?
+            ORDER BY rp.recorded_at, rp.id
+            """,
+            (citation_key,),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -381,6 +600,72 @@ class BibliographyStore:
             (citation_key, role),
         ).fetchall()
         return [str(row["full_name"]) for row in rows]
+
+    def _iter_graph_edges(self, citation_key: str, allowed_relations: set[str]) -> list[sqlite3.Row]:
+        rows = self.connection.execute(
+            """
+            SELECT e.citation_key AS source_citation_key, r.target_citation_key, r.relation_type
+            FROM relations r
+            JOIN entries e ON e.id = r.source_entry_id
+            WHERE e.citation_key = ? AND r.relation_type IN ({placeholders})
+            ORDER BY r.relation_type, r.target_citation_key
+            """.format(placeholders=",".join("?" for _ in allowed_relations)),
+            (citation_key, *sorted(allowed_relations)),
+        ).fetchall()
+
+        reverse_rows = []
+        if "cited_by" in allowed_relations:
+            reverse_rows = self.connection.execute(
+                """
+                SELECT ? AS source_citation_key, e.citation_key AS target_citation_key, 'cited_by' AS relation_type
+                FROM relations r
+                JOIN entries e ON e.id = r.source_entry_id
+                WHERE r.target_citation_key = ? AND r.relation_type = 'cites'
+                ORDER BY e.citation_key
+                """,
+                (citation_key, citation_key),
+            ).fetchall()
+
+        seen: set[tuple[str, str]] = set()
+        merged: list[sqlite3.Row] = []
+        for row in list(rows) + list(reverse_rows):
+            key = (str(row["relation_type"]), str(row["target_citation_key"]))
+            if key not in seen:
+                seen.add(key)
+                merged.append(row)
+        return merged
+
+    def _ensure_entry_columns(self) -> None:
+        columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(entries)").fetchall()
+        }
+        if "review_status" not in columns:
+            self.connection.execute(
+                "ALTER TABLE entries ADD COLUMN review_status TEXT NOT NULL DEFAULT 'draft'"
+            )
+
+    def _record_field_provenance(
+        self,
+        entry_id: int,
+        entry: BibEntry,
+        source_type: str,
+        source_label: str,
+        operation: str,
+        fulltext: str | None,
+    ) -> None:
+        field_items = list(entry.fields.items())
+        if fulltext:
+            field_items.append(("fulltext", fulltext))
+
+        for field_name, field_value in field_items:
+            self.connection.execute(
+                """
+                INSERT INTO field_provenance (
+                    entry_id, field_name, field_value, source_type, source_label, operation, confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (entry_id, field_name, field_value, source_type, source_label, operation, 1.0),
+            )
 
 
 def _split_names(value: str) -> list[str]:
