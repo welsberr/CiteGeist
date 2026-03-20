@@ -472,6 +472,7 @@ class BibliographyStore:
         limit: int = 50,
         doi_only: bool = False,
         stub_only: bool = False,
+        misc_only: bool = False,
         topic_slug: str | None = None,
     ) -> list[dict[str, object]]:
         clauses: list[str] = []
@@ -488,6 +489,9 @@ class BibliographyStore:
 
         if doi_only:
             clauses.append("e.doi IS NOT NULL AND TRIM(e.doi) <> ''")
+
+        if misc_only:
+            clauses.append("e.entry_type = 'misc'")
 
         if stub_only:
             clauses.append(

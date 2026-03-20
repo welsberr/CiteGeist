@@ -218,6 +218,34 @@ def test_cli_resolve_stubs_preview_lists_doi_stub_candidates(tmp_path: Path):
     assert payload[0]["title"] == "Referenced work 6"
 
 
+def test_cli_resolve_stubs_preview_can_target_all_misc_entries(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{miscwithtitle,
+  author = {Doe, Alex},
+  title = {Avida Conference Record},
+  year = {2005},
+  doi = {10.1117/12.512613}
+}
+
+@article{complete,
+  author = {Smith, Jane},
+  title = {Complete Record},
+  year = {2024},
+  doi = {10.1000/complete}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    result = run_cli(tmp_path, "resolve-stubs", "--doi-only", "--all-misc", "--preview", "--limit", "10")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert [row["citation_key"] for row in payload] == ["miscwithtitle"]
+
+
 def test_cli_resolve_stubs_enriches_matching_candidates(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(
@@ -269,6 +297,63 @@ def test_cli_resolve_stubs_enriches_matching_candidates(tmp_path: Path):
     payload = json.loads(show.stdout)
     assert payload["title"] == "Resolved Work"
     assert payload["review_status"] == "enriched"
+
+
+def test_cli_resolve_stubs_can_enrich_all_misc_entries(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{miscwithtitle,
+  author = {Doe, Alex},
+  title = {Avida Conference Record},
+  year = {2005},
+  doi = {10.1117/12.512613}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    from citegeist.bibtex import BibEntry
+    from citegeist.resolve import Resolution
+
+    database = tmp_path / "library.sqlite3"
+
+    with patch("citegeist.cli.MetadataResolver.resolve_entry") as mocked_resolve:
+        mocked_resolve.return_value = Resolution(
+            entry=BibEntry(
+                entry_type="inproceedings",
+                citation_key="resolvedkey",
+                fields={
+                    "author": "Koza, J. R.",
+                    "title": "Genetic Programming IV: Routine Human-Competitive Machine Intelligence",
+                    "year": "2005",
+                    "booktitle": "Genetic and Evolutionary Computation Conference",
+                    "doi": "10.1117/12.512613",
+                },
+            ),
+            source_type="resolver",
+            source_label="crossref:doi:10.1117/12.512613",
+        )
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "resolve-stubs",
+                "--doi-only",
+                "--all-misc",
+                "--limit",
+                "10",
+            ]
+        )
+
+    assert exit_code == 0
+    show = run_cli(tmp_path, "show", "--conflicts", "miscwithtitle")
+    payload = json.loads(show.stdout)
+    assert payload["entry_type"] == "inproceedings"
+    assert payload["title"] == "Avida Conference Record"
+    assert payload["booktitle"] == "Genetic and Evolutionary Computation Conference"
+    assert "title" in {item["field_name"] for item in payload["field_conflicts"]}
 
 
 def test_cli_resolve_conflicts_updates_status(tmp_path: Path):

@@ -354,6 +354,33 @@ def test_store_lists_stub_resolution_candidates():
         store.close()
 
 
+def test_store_can_list_all_misc_resolution_candidates():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@misc{miscwithtitle,
+  author = {Doe, Alex},
+  title = {Avida Conference Record},
+  year = {2005},
+  doi = {10.1117/12.512613}
+}
+
+@article{complete,
+  author = {Smith, Jane},
+  title = {Complete Record},
+  year = {2024},
+  doi = {10.1000/complete}
+}
+"""
+        )
+
+        candidates = store.list_resolution_candidates(limit=10, doi_only=True, misc_only=True)
+        assert [row["citation_key"] for row in candidates] == ["miscwithtitle"]
+    finally:
+        store.close()
+
+
 def test_store_can_stage_and_review_topic_phrase_suggestion():
     store = BibliographyStore()
     try:

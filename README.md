@@ -134,6 +134,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --to
 PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topics
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topic-entries abiogenesis
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic abiogenesis --output abiogenesis.bib

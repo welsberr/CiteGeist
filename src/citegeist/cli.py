@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only consider candidates that already have a DOI",
     )
     resolve_stubs_parser.add_argument(
+        "--all-misc",
+        action="store_true",
+        help="Consider all stored @misc entries instead of only placeholder-like stub records",
+    )
+    resolve_stubs_parser.add_argument(
         "--topic",
         help="Optional topic slug to limit candidate selection",
     )
@@ -533,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
         if args.command == "resolve-stubs":
-            return _run_resolve_stubs(store, args.limit, args.doi_only, args.topic, args.preview)
+            return _run_resolve_stubs(store, args.limit, args.doi_only, args.all_misc, args.topic, args.preview)
         if args.command == "graph":
             return _run_graph(
                 store,
@@ -824,13 +829,15 @@ def _run_resolve_stubs(
     store: BibliographyStore,
     limit: int,
     doi_only: bool,
+    all_misc: bool,
     topic_slug: str | None,
     preview: bool,
 ) -> int:
     candidates = store.list_resolution_candidates(
         limit=limit,
         doi_only=doi_only,
-        stub_only=True,
+        stub_only=not all_misc,
+        misc_only=all_misc,
         topic_slug=topic_slug,
     )
     if preview:

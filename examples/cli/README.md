@@ -199,6 +199,18 @@ Enrich DOI-bearing placeholder records inside one topic slice:
 .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --topic artificial-life --limit 25
 ```
 
+Preview all current `@misc` entries with DOIs, not just placeholder-like stubs:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --preview --limit 25
+```
+
+Re-enrich all current `@misc` entries with DOIs:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25
+```
+
 ## Explore Citation Graphs
 
 Purpose: traverse citation edges, export graph data, and render quick visualizations.

@@ -292,7 +292,7 @@ def merge_entries_with_conflicts(base: BibEntry, resolved: BibEntry) -> tuple[Bi
             merged_fields[key] = value
     return (
         BibEntry(
-            entry_type=base.entry_type or resolved.entry_type,
+            entry_type=_merged_entry_type(base.entry_type, resolved.entry_type),
             citation_key=base.citation_key,
             fields=merged_fields,
         ),
@@ -308,6 +308,12 @@ def _is_placeholder_value(field_name: str, value: str) -> bool:
     if field_name == "title":
         return bool(re.fullmatch(r"referenced work \d+", lowered)) or lowered.startswith("untitled")
     return False
+
+
+def _merged_entry_type(base_entry_type: str, resolved_entry_type: str) -> str:
+    if base_entry_type == "misc" and resolved_entry_type and resolved_entry_type != "misc":
+        return resolved_entry_type
+    return base_entry_type or resolved_entry_type
 
 
 def _crossref_message_to_entry(message: dict) -> BibEntry:

@@ -128,6 +128,30 @@ def test_merge_entries_replaces_placeholder_titles_without_conflict():
     assert conflicts == []
 
 
+def test_merge_entries_upgrades_misc_type_when_resolver_has_better_type():
+    base = BibEntry(
+        entry_type="misc",
+        citation_key="miscwithtitle",
+        fields={"title": "Avida Conference Record", "doi": "10.1117/12.512613"},
+    )
+    resolved = BibEntry(
+        entry_type="inproceedings",
+        citation_key="resolved",
+        fields={"title": "Genetic Programming IV", "booktitle": "GECCO"},
+    )
+
+    merged, conflicts = merge_entries_with_conflicts(base, resolved)
+
+    assert merged.entry_type == "inproceedings"
+    assert conflicts == [
+        {
+            "field_name": "title",
+            "current_value": "Avida Conference Record",
+            "proposed_value": "Genetic Programming IV",
+        }
+    ]
+
+
 def test_resolver_tries_doi_before_dblp():
     resolver = MetadataResolver()
     calls: list[tuple[str, str]] = []
