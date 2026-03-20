@@ -281,6 +281,46 @@ def test_store_can_set_topic_expansion_phrase():
         store.close()
 
 
+def test_store_lists_stub_resolution_candidates():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+
+@article{complete,
+  author = {Smith, Jane},
+  title = {Complete Record},
+  year = {2024},
+  doi = {10.1000/complete}
+}
+"""
+        )
+        store.add_entry_topic(
+            "stubdoi",
+            topic_slug="artificial-life",
+            topic_name="Artificial life",
+            source_label="test",
+        )
+
+        candidates = store.list_resolution_candidates(limit=10, doi_only=True, stub_only=True)
+        assert [row["citation_key"] for row in candidates] == ["stubdoi"]
+
+        topic_candidates = store.list_resolution_candidates(
+            limit=10,
+            doi_only=True,
+            stub_only=True,
+            topic_slug="artificial-life",
+        )
+        assert [row["citation_key"] for row in topic_candidates] == ["stubdoi"]
+    finally:
+        store.close()
+
+
 def test_store_can_stage_and_review_topic_phrase_suggestion():
     store = BibliographyStore()
     try:

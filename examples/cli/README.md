@@ -181,6 +181,18 @@ Resolve one or more entries against remote metadata:
 .venv/bin/python -m citegeist --db library.sqlite3 resolve langton1989artificial1 bedau2003artificial2
 ```
 
+Preview DOI-bearing placeholder records before enriching them:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
+```
+
+Enrich DOI-bearing placeholder records inside one topic slice:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --topic artificial-life --limit 25
+```
+
 ## Explore Citation Graphs
 
 Purpose: traverse citation edges, export graph data, and render quick visualizations.

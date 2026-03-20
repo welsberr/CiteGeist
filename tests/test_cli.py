@@ -154,6 +154,87 @@ def test_cli_resolve_updates_entry(tmp_path: Path):
     assert payload["field_conflicts"][0]["field_name"] == "title"
 
 
+def test_cli_resolve_stubs_preview_lists_doi_stub_candidates(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+
+@article{complete,
+  author = {Smith, Jane},
+  title = {Complete Record},
+  year = {2024},
+  doi = {10.1000/complete}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    result = run_cli(tmp_path, "resolve-stubs", "--doi-only", "--preview", "--limit", "10")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert [row["citation_key"] for row in payload] == ["stubdoi"]
+    assert payload[0]["title"] == "Referenced work 6"
+
+
+def test_cli_resolve_stubs_enriches_matching_candidates(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@misc{stubdoi,
+  title = {Referenced work 6},
+  doi = {10.1200/JCO.2002.04.117},
+  url = {https://doi.org/10.1200/JCO.2002.04.117}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    from citegeist.bibtex import BibEntry
+    from citegeist.resolve import Resolution
+
+    database = tmp_path / "library.sqlite3"
+
+    with patch("citegeist.cli.MetadataResolver.resolve_entry") as mocked_resolve:
+        mocked_resolve.return_value = Resolution(
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="resolvedkey",
+                fields={
+                    "author": "Doe, Alex",
+                    "title": "Resolved Work",
+                    "year": "2002",
+                    "doi": "10.1200/JCO.2002.04.117",
+                    "journal": "Journal of Clinical Oncology",
+                },
+            ),
+            source_type="resolver",
+            source_label="crossref:doi:10.1200/JCO.2002.04.117",
+        )
+        exit_code = main(
+            [
+                "--db",
+                str(database),
+                "resolve-stubs",
+                "--doi-only",
+                "--limit",
+                "10",
+            ]
+        )
+
+    assert exit_code == 0
+    show = run_cli(tmp_path, "show", "stubdoi")
+    payload = json.loads(show.stdout)
+    assert payload["title"] == "Resolved Work"
+    assert payload["review_status"] == "enriched"
+
+
 def test_cli_resolve_conflicts_updates_status(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(

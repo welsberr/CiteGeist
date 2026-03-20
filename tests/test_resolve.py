@@ -108,6 +108,25 @@ def test_merge_entries_with_conflicts_records_disagreements():
     ]
 
 
+def test_merge_entries_replaces_placeholder_titles_without_conflict():
+    base = BibEntry(
+        entry_type="misc",
+        citation_key="stubdoi",
+        fields={"title": "Referenced work 6", "doi": "10.1200/JCO.2002.04.117"},
+    )
+    resolved = BibEntry(
+        entry_type="article",
+        citation_key="resolved",
+        fields={"title": "Resolved Work", "journal": "Journal of Clinical Oncology"},
+    )
+
+    merged, conflicts = merge_entries_with_conflicts(base, resolved)
+
+    assert merged.fields["title"] == "Resolved Work"
+    assert merged.fields["journal"] == "Journal of Clinical Oncology"
+    assert conflicts == []
+
+
 def test_resolver_tries_doi_before_dblp():
     resolver = MetadataResolver()
     calls: list[tuple[str, str]] = []

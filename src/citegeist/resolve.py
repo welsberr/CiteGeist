@@ -239,6 +239,9 @@ def merge_entries_with_conflicts(base: BibEntry, resolved: BibEntry) -> tuple[Bi
         if not value:
             continue
         current_value = merged_fields.get(key, "")
+        if _is_placeholder_value(key, current_value) and current_value != value:
+            merged_fields[key] = value
+            continue
         if current_value and current_value != value:
             conflicts.append(
                 {
@@ -258,6 +261,16 @@ def merge_entries_with_conflicts(base: BibEntry, resolved: BibEntry) -> tuple[Bi
         ),
         conflicts,
     )
+
+
+def _is_placeholder_value(field_name: str, value: str) -> bool:
+    normalized = " ".join((value or "").split()).strip()
+    if not normalized:
+        return True
+    lowered = normalized.lower()
+    if field_name == "title":
+        return bool(re.fullmatch(r"referenced work \d+", lowered)) or lowered.startswith("untitled")
+    return False
 
 
 def _crossref_message_to_entry(message: dict) -> BibEntry:

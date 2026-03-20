@@ -67,6 +67,26 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve", help="Enrich stored entries from external metadata sources")
     resolve_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
 
+    resolve_stubs_parser = subparsers.add_parser(
+        "resolve-stubs",
+        help="Find and enrich stub-like stored entries, optionally limited to DOI-bearing candidates",
+    )
+    resolve_stubs_parser.add_argument("--limit", type=int, default=25, help="Maximum candidate entries to inspect")
+    resolve_stubs_parser.add_argument(
+        "--doi-only",
+        action="store_true",
+        help="Only consider candidates that already have a DOI",
+    )
+    resolve_stubs_parser.add_argument(
+        "--topic",
+        help="Optional topic slug to limit candidate selection",
+    )
+    resolve_stubs_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Show the selected candidate entries without resolving them",
+    )
+
     graph_parser = subparsers.add_parser("graph", help="Traverse citation relations from one or more seed entries")
     graph_parser.add_argument("citation_keys", nargs="+", help="Seed citation keys")
     graph_parser.add_argument(
@@ -502,6 +522,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_extract(Path(args.input), args.output)
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
+        if args.command == "resolve-stubs":
+            return _run_resolve_stubs(store, args.limit, args.doi_only, args.topic, args.preview)
         if args.command == "graph":
             return _run_graph(
                 store,
@@ -744,38 +766,66 @@ def _run_resolve(store: BibliographyStore, citation_keys: list[str]) -> int:
     resolver = MetadataResolver()
     exit_code = 0
     for citation_key in citation_keys:
-        existing = store.get_entry(citation_key)
-        if existing is None:
-            print(f"Entry not found: {citation_key}", file=sys.stderr)
+        if not _resolve_one(store, resolver, citation_key):
             exit_code = 1
-            continue
-        bibtex = store.get_entry_bibtex(citation_key)
-        if not bibtex:
-            print(f"Entry not renderable: {citation_key}", file=sys.stderr)
-            exit_code = 1
-            continue
-        current_entry = parse_bibtex(bibtex)[0]
-        resolution = resolver.resolve_entry(current_entry)
-        if resolution is None:
-            print(f"No resolver match: {citation_key}", file=sys.stderr)
-            exit_code = 1
-            continue
-        merged, conflicts = merge_entries_with_conflicts(current_entry, resolution.entry)
-        store.replace_entry(
+    return exit_code
+
+
+def _resolve_one(store: BibliographyStore, resolver: MetadataResolver, citation_key: str) -> bool:
+    existing = store.get_entry(citation_key)
+    if existing is None:
+        print(f"Entry not found: {citation_key}", file=sys.stderr)
+        return False
+    bibtex = store.get_entry_bibtex(citation_key)
+    if not bibtex:
+        print(f"Entry not renderable: {citation_key}", file=sys.stderr)
+        return False
+    current_entry = parse_bibtex(bibtex)[0]
+    resolution = resolver.resolve_entry(current_entry)
+    if resolution is None:
+        print(f"No resolver match: {citation_key}", file=sys.stderr)
+        return False
+    merged, conflicts = merge_entries_with_conflicts(current_entry, resolution.entry)
+    store.replace_entry(
+        citation_key,
+        merged,
+        source_type=resolution.source_type,
+        source_label=resolution.source_label,
+        review_status="enriched",
+    )
+    if conflicts:
+        store.record_conflicts(
             citation_key,
-            merged,
+            conflicts,
             source_type=resolution.source_type,
             source_label=resolution.source_label,
-            review_status="enriched",
         )
-        if conflicts:
-            store.record_conflicts(
-                citation_key,
-                conflicts,
-                source_type=resolution.source_type,
-                source_label=resolution.source_label,
-            )
-        print(f"{citation_key}\t{resolution.source_label}")
+    print(f"{citation_key}\t{resolution.source_label}")
+    return True
+
+
+def _run_resolve_stubs(
+    store: BibliographyStore,
+    limit: int,
+    doi_only: bool,
+    topic_slug: str | None,
+    preview: bool,
+) -> int:
+    candidates = store.list_resolution_candidates(
+        limit=limit,
+        doi_only=doi_only,
+        stub_only=True,
+        topic_slug=topic_slug,
+    )
+    if preview:
+        print(json.dumps(candidates, indent=2))
+        return 0
+
+    resolver = MetadataResolver()
+    exit_code = 0
+    for candidate in candidates:
+        if not _resolve_one(store, resolver, str(candidate["citation_key"])):
+            exit_code = 1
     return exit_code
 
 

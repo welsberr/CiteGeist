@@ -133,6 +133,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --se
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --topic "bayesian nonparametrics" --preview --topic-commit-limit 5
 PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topics
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topic-entries abiogenesis
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic abiogenesis --output abiogenesis.bib
@@ -157,19 +158,20 @@ For live-source development, prefer fixture-backed or cache-backed source client
 
 ## Example Application
 
-Use `stage-topic-phrases` to load those suggestions into the database as review items. Staging stores the candidate in `suggested_phrase` and marks the topic `pending` without changing the active `expansion_phrase`.
-Use `export-topic-phrase-reviews` to write an editable JSON template directly from the database for the currently staged suggestions. That gives you a round-trip path from DB review queue to file edits and back into `review-topic-phrases`.
-Use `review-topic-phrase` to accept or reject one staged suggestion in place. Accepting a suggestion copies it into `expansion_phrase` and clears it from the staged review queue; rejecting it preserves the staged suggestion together with its review state.
-Use `review-topic-phrases` when you want to apply many accept/reject decisions from one JSON file. Each item should carry `slug`, `status`, and optional `phrase` / `review_notes`.
-Use `apply-topic-phrases` when you want a direct patch path instead of the staged review flow. It accepts either the raw suggestion list or an object with a `topics` list, and will apply `suggested_phrase` or `phrase` to matching topic slugs immediately.
-Use `topic-phrase-reviews --phrase-review-status pending` when you want a compact audit view of unresolved staged suggestions, including both the current live phrase and the pending replacement.
-Use `enrich-talkorigins` when you want to target those weak canonical entries for resolver-based metadata upgrades before retrying graph expansion on imported topic slices.
-Use `review-talkorigins` when you want one JSON review artifact that combines weak canonical clusters with dry-run enrichment outcomes for manual cleanup.
-Use `expand-topic` when you already have both a topic phrase and a curated topic seed set in the database: it expands outward from the topic’s existing entries, then only assigns discovered works back to that topic if they clear a topic-relevance threshold. Write-enabled assignment is stricter than preview ranking: a candidate must clear the score threshold and show a non-generic title anchor to the topic phrase, so broad methods papers do not get attached just because their abstracts or related terms overlap. On large noisy topics, prefer `--seed-key` to restrict the run to just the trusted seed entries you want to expand from, and use `--preview` first to inspect discovered candidates and relevance scores before writing anything.
+- Use `stage-topic-phrases` to load those suggestions into the database as review items. Staging stores the candidate in `suggested_phrase` and marks the topic `pending` without changing the active `expansion_phrase`.
 
-Use `set-topic-phrase` to store a curated expansion phrase on the topic itself. When a stored phrase exists, `expand-topic` will use it automatically if you do not pass `--topic-phrase`. Batch bootstrap jobs can also set `topic_slug`, `topic_name`, and `topic_phrase` so curated topic metadata is created as part of the run.
-Use `topics --phrase-review-status pending` when you want to audit only topics whose staged phrase suggestions still need review.
-`--allow-unsafe-search-matches` exists only for bounded experiments on copied databases when you explicitly want to relax trust to exercise downstream expansion behavior.
+- Use `export-topic-phrase-reviews` to write an editable JSON template directly from the database for the currently staged suggestions. That gives you a round-trip path from DB review queue to file edits and back into `review-topic-phrases`.
+- Use `review-topic-phrase` to accept or reject one staged suggestion in place. Accepting a suggestion copies it into `expansion_phrase` and clears it from the staged review queue; rejecting it preserves the staged suggestion together with its review state.
+- Use `review-topic-phrases` when you want to apply many accept/reject decisions from one JSON file. Each item should carry `slug`, `status`, and optional `phrase` / `review_notes`.
+- Use `apply-topic-phrases` when you want a direct patch path instead of the staged review flow. It accepts either the raw suggestion list or an object with a `topics` list, and will apply `suggested_phrase` or `phrase` to matching topic slugs immediately.
+- Use `topic-phrase-reviews --phrase-review-status pending` when you want a compact audit view of unresolved staged suggestions, including both the current live phrase and the pending replacement.
+- Use `enrich-talkorigins` when you want to target those weak canonical entries for resolver-based metadata upgrades before retrying graph expansion on imported topic slices.
+- Use `review-talkorigins` when you want one JSON review artifact that combines weak canonical clusters with dry-run enrichment outcomes for manual cleanup.
+- Use `expand-topic` when you already have both a topic phrase and a curated topic seed set in the database: it expands outward from the topic’s existing entries, then only assigns discovered works back to that topic if they clear a topic-relevance threshold. Write-enabled assignment is stricter than preview ranking: a candidate must clear the score threshold and show a non-generic title anchor to the topic phrase, so broad methods papers do not get attached just because their abstracts or related terms overlap. On large noisy topics, prefer `--seed-key` to restrict the run to just the trusted seed entries you want to expand from, and use `--preview` first to inspect discovered candidates and relevance scores before writing anything.
+
+- Use `set-topic-phrase` to store a curated expansion phrase on the topic itself. When a stored phrase exists, `expand-topic` will use it automatically if you do not pass `--topic-phrase`. Batch bootstrap jobs can also set `topic_slug`, `topic_name`, and `topic_phrase` so curated topic metadata is created as part of the run.
+- Use `topics --phrase-review-status pending` when you want to audit only topics whose staged phrase suggestions still need review.
+- `--allow-unsafe-search-matches` exists only for bounded experiments on copied databases when you explicitly want to relax trust to exercise downstream expansion behavior.
 
 The TalkOrigins corpus pipeline remains in the repository as an example application rather than a core package surface. Use the example-scoped Python namespace:
 

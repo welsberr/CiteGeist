@@ -466,6 +466,72 @@ class BibliographyStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_resolution_candidates(
+        self,
+        *,
+        limit: int = 50,
+        doi_only: bool = False,
+        stub_only: bool = False,
+        topic_slug: str | None = None,
+    ) -> list[dict[str, object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        joins = ""
+
+        if topic_slug is not None:
+            joins = """
+            JOIN entry_topics et ON et.entry_id = e.id
+            JOIN topics t ON t.id = et.topic_id
+            """
+            clauses.append("t.slug = ?")
+            params.append(topic_slug)
+
+        if doi_only:
+            clauses.append("e.doi IS NOT NULL AND TRIM(e.doi) <> ''")
+
+        if stub_only:
+            clauses.append(
+                """
+                (
+                    e.title IS NULL
+                    OR TRIM(e.title) = ''
+                    OR LOWER(TRIM(e.title)) GLOB 'referenced work *'
+                    OR LOWER(TRIM(e.title)) GLOB 'untitled*'
+                    OR (
+                        e.entry_type = 'misc'
+                        AND (
+                            e.abstract IS NULL
+                            OR TRIM(e.abstract) = ''
+                        )
+                    )
+                )
+                """
+            )
+
+        where_clause = ""
+        if clauses:
+            where_clause = "WHERE " + " AND ".join(clauses)
+
+        rows = self.connection.execute(
+            f"""
+            SELECT DISTINCT
+                e.citation_key,
+                e.entry_type,
+                e.review_status,
+                e.title,
+                e.year,
+                e.doi,
+                e.abstract
+            FROM entries e
+            {joins}
+            {where_clause}
+            ORDER BY COALESCE(e.year, ''), e.citation_key
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def ensure_topic(
         self,
         slug: str,
