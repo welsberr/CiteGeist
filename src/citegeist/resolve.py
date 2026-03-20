@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -30,6 +31,11 @@ class MetadataResolver:
             if resolved is not None:
                 return resolved
 
+        if openalex_id := entry.fields.get("openalex"):
+            resolved = self.resolve_openalex(openalex_id)
+            if resolved is not None:
+                return resolved
+
         if dblp_key := entry.fields.get("dblp"):
             resolved = self.resolve_dblp(dblp_key)
             if resolved is not None:
@@ -37,6 +43,15 @@ class MetadataResolver:
 
         if arxiv_id := entry.fields.get("arxiv"):
             resolved = self.resolve_arxiv(arxiv_id)
+            if resolved is not None:
+                return resolved
+
+        if title := entry.fields.get("title"):
+            resolved = self.search_openalex_best_match(
+                title=title,
+                author_text=entry.fields.get("author", ""),
+                year=entry.fields.get("year", ""),
+            )
             if resolved is not None:
                 return resolved
 
@@ -100,6 +115,55 @@ class MetadataResolver:
             entry=_arxiv_atom_entry_to_bib(entry, arxiv_id),
             source_type="resolver",
             source_label=f"arxiv:id:{arxiv_id}",
+        )
+
+    def resolve_openalex(self, openalex_id: str) -> Resolution | None:
+        normalized_id = _normalize_openalex_id(openalex_id)
+        payload = self.source_client.get_json(f"https://api.openalex.org/works/{normalized_id}")
+        if not payload:
+            return None
+        return Resolution(
+            entry=_openalex_work_to_entry(payload),
+            source_type="resolver",
+            source_label=f"openalex:id:{normalized_id}",
+        )
+
+    def search_openalex(self, title: str, limit: int = 5) -> list[BibEntry]:
+        query = urllib.parse.urlencode({"search": title, "per-page": limit})
+        payload = self.source_client.get_json(f"https://api.openalex.org/works?{query}")
+        return [_openalex_work_to_entry(item) for item in payload.get("results", [])]
+
+    def search_openalex_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        candidates = self.search_openalex(title, limit=5)
+        if not candidates:
+            return None
+
+        title_norm = _normalize_match_text(title)
+        author_norm = _normalize_match_text(author_text)
+        for candidate in candidates:
+            candidate_title = _normalize_match_text(candidate.fields.get("title", ""))
+            candidate_author = _normalize_match_text(candidate.fields.get("author", ""))
+            candidate_year = candidate.fields.get("year", "")
+            if candidate_title == title_norm:
+                if author_norm and candidate_author and author_norm.split(" and ")[0] not in candidate_author:
+                    continue
+                if year and candidate_year and year != candidate_year:
+                    continue
+                return Resolution(
+                    entry=candidate,
+                    source_type="resolver",
+                    source_label=f"openalex:search:{title}",
+                )
+
+        return Resolution(
+            entry=candidates[0],
+            source_type="resolver",
+            source_label=f"openalex:search:{title}",
         )
 
 def merge_entries(base: BibEntry, resolved: BibEntry) -> BibEntry:
@@ -221,3 +285,81 @@ def _make_resolution_key(author_text: str, year: str, title: str) -> str:
     family_name = "".join(ch for ch in family_name.lower() if ch.isalnum()) or "ref"
     first_word = "".join(ch for ch in title.split()[0].lower() if ch.isalnum()) if title.split() else "untitled"
     return f"{family_name}{year}{first_word}"
+
+
+def _openalex_work_to_entry(work: dict) -> BibEntry:
+    title = work.get("display_name", "") or "Untitled work"
+    year = str(work.get("publication_year") or "")
+    doi = _normalize_openalex_doi(work.get("doi"))
+    openalex_id = _normalize_openalex_id(work.get("id", ""))
+    authors = " and ".join(_openalex_author_name(item) for item in work.get("authorships", []))
+    source = ((work.get("primary_location") or {}).get("source") or {}).get("display_name", "")
+    work_type = work.get("type", "")
+
+    fields: dict[str, str] = {}
+    if authors:
+        fields["author"] = authors
+    if title:
+        fields["title"] = title
+    if year:
+        fields["year"] = year
+    if doi:
+        fields["doi"] = doi
+        fields["url"] = f"https://doi.org/{doi}"
+    if openalex_id:
+        fields["openalex"] = openalex_id
+        fields.setdefault("url", f"https://openalex.org/{openalex_id}")
+    if abstract := work.get("abstract_inverted_index"):
+        fields["abstract"] = _openalex_abstract_text(abstract)
+    if source:
+        if work_type == "article":
+            fields["journal"] = source
+        else:
+            fields["booktitle"] = source
+
+    citation_key = f"openalex{re.sub(r'[^A-Za-z0-9]+', '', openalex_id).lower()}" if openalex_id else _make_resolution_key(authors or "openalex", year or "n.d.", title or "untitled")
+    return BibEntry(entry_type=_openalex_type_to_bibtype(work_type), citation_key=citation_key, fields=fields)
+
+
+def _openalex_author_name(authorship: dict) -> str:
+    author = authorship.get("author") or {}
+    return " ".join(str(author.get("display_name", "")).split())
+
+
+def _openalex_abstract_text(inverted_index: dict) -> str:
+    positions: dict[int, str] = {}
+    for word, indexes in inverted_index.items():
+        for index in indexes:
+            positions[int(index)] = word
+    return " ".join(word for _, word in sorted(positions.items()))
+
+
+def _openalex_type_to_bibtype(work_type: str) -> str:
+    mapping = {
+        "article": "article",
+        "book": "book",
+        "book-chapter": "incollection",
+        "dissertation": "phdthesis",
+        "proceedings-article": "inproceedings",
+    }
+    return mapping.get(work_type, "misc")
+
+
+def _normalize_openalex_id(value: str) -> str:
+    if not value:
+        return ""
+    return value.rsplit("/", 1)[-1]
+
+
+def _normalize_openalex_doi(value: str | None) -> str:
+    if not value:
+        return ""
+    if value.startswith("https://doi.org/"):
+        return value[len("https://doi.org/") :]
+    return value
+
+
+def _normalize_match_text(value: str) -> str:
+    lowered = value.lower()
+    lowered = re.sub(r"\W+", " ", lowered)
+    return " ".join(lowered.split())

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 
-IDENTIFIER_FIELDS = ("doi", "isbn", "issn", "pmid", "arxiv", "dblp", "oai", "url")
+IDENTIFIER_FIELDS = ("doi", "isbn", "issn", "pmid", "arxiv", "dblp", "oai", "openalex", "url")
 RELATION_FIELDS = {
     "references": "cites",
     "cites": "cites",
@@ -383,7 +383,7 @@ class BibliographyStore:
             "SELECT * FROM entries WHERE citation_key = ?",
             (citation_key,),
         ).fetchone()
-        return dict(row) if row else None
+        return self._row_to_entry_dict(row) if row else None
 
     def list_entries(self, limit: int = 50) -> list[dict[str, object]]:
         rows = self.connection.execute(
@@ -600,6 +600,13 @@ class BibliographyStore:
             (citation_key, role),
         ).fetchall()
         return [str(row["full_name"]) for row in rows]
+
+    def _row_to_entry_dict(self, row: sqlite3.Row) -> dict[str, object]:
+        payload = dict(row)
+        extra_fields = json.loads(str(payload.get("extra_fields_json") or "{}"))
+        for key, value in extra_fields.items():
+            payload.setdefault(key, value)
+        return payload
 
     def _iter_graph_edges(self, citation_key: str, allowed_relations: set[str]) -> list[sqlite3.Row]:
         rows = self.connection.execute(

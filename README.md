@@ -137,6 +137,14 @@ PYTHONPATH=src .venv/bin/python scripts/live_smoke.py
 
 By default, live tests are skipped. They only run when `CITEGEIST_LIVE_TESTS=1` is set.
 
+Convenience targets:
+
+```bash
+make test
+make test-live
+make live-smoke
+```
+
 ## Near-Term Priorities
 
 - additional resolvers and expansion paths for non-DOI scholarly ecosystems.

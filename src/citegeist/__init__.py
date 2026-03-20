@@ -1,5 +1,5 @@
 from .bibtex import BibEntry, parse_bibtex
-from .expand import CrossrefExpander
+from .expand import CrossrefExpander, OpenAlexExpander
 from .extract import extract_references
 from .resolve import MetadataResolver, merge_entries
 from .sources import SourceClient
@@ -10,6 +10,7 @@ __all__ = [
     "BibliographyStore",
     "CrossrefExpander",
     "MetadataResolver",
+    "OpenAlexExpander",
     "SourceClient",
     "extract_references",
     "merge_entries",

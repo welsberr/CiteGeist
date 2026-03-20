@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .bibtex import parse_bibtex, render_bibtex
-from .expand import CrossrefExpander
+from .expand import CrossrefExpander, OpenAlexExpander
 from .extract import extract_references
 from .resolve import MetadataResolver, merge_entries
 from .storage import BibliographyStore
@@ -69,10 +69,17 @@ def build_parser() -> argparse.ArgumentParser:
     expand_parser.add_argument("citation_keys", nargs="+", help="Seed citation keys to expand")
     expand_parser.add_argument(
         "--source",
-        choices=["crossref"],
+        choices=["crossref", "openalex"],
         default="crossref",
         help="External source used for graph expansion",
     )
+    expand_parser.add_argument(
+        "--relation",
+        choices=["cites", "cited_by"],
+        default="cites",
+        help="Graph direction to expand for sources that support it",
+    )
+    expand_parser.add_argument("--limit", type=int, default=25, help="Maximum related works to fetch per seed")
 
     return parser
 
@@ -107,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.missing_only,
             )
         if args.command == "expand":
-            return _run_expand(store, args.citation_keys, args.source)
+            return _run_expand(store, args.citation_keys, args.source, args.relation, args.limit)
     finally:
         store.close()
 
@@ -237,14 +244,25 @@ def _run_graph(
     return 0
 
 
-def _run_expand(store: BibliographyStore, citation_keys: list[str], source: str) -> int:
-    if source != "crossref":
+def _run_expand(
+    store: BibliographyStore,
+    citation_keys: list[str],
+    source: str,
+    relation: str,
+    limit: int,
+) -> int:
+    if source == "crossref":
+        expander = CrossrefExpander()
+        expand_fn = lambda key: expander.expand_entry_references(store, key)
+    elif source == "openalex":
+        expander = OpenAlexExpander()
+        expand_fn = lambda key: expander.expand_entry(store, key, relation_type=relation, limit=limit)
+    else:
         print(f"Unsupported expansion source: {source}", file=sys.stderr)
         return 1
 
-    expander = CrossrefExpander()
     all_results = []
     for citation_key in citation_keys:
-        all_results.extend(expander.expand_entry_references(store, citation_key))
+        all_results.extend(expand_fn(citation_key))
     print(json.dumps([asdict(result) for result in all_results], indent=2))
     return 0
