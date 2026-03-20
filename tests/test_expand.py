@@ -1,3 +1,5 @@
+import urllib.error
+
 from citegeist.bibtex import BibEntry
 from citegeist.expand import CrossrefExpander, _crossref_reference_to_entry
 from citegeist.resolve import Resolution
@@ -138,3 +140,29 @@ def test_crossref_reference_to_entry_infers_non_misc_for_proceedings_like_text()
     )
 
     assert entry.entry_type == "inproceedings"
+
+
+def test_crossref_expander_returns_empty_on_fetch_error():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024},
+  doi = {10.1000/seed-doi}
+}
+"""
+        )
+
+        expander = CrossrefExpander()
+
+        def raise_404(_url: str):
+            raise urllib.error.HTTPError(_url, 404, "Not Found", hdrs=None, fp=None)
+
+        expander.resolver.source_client._fetch_bytes = raise_404  # type: ignore[method-assign]
+
+        assert expander.expand_entry_references(store, "seed2024") == []
+    finally:
+        store.close()

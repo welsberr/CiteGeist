@@ -1,4 +1,5 @@
 from pathlib import Path
+import urllib.error
 
 from citegeist.sources import SourceClient
 
@@ -39,3 +40,14 @@ def test_source_client_falls_back_to_latin1_for_text(tmp_path: Path):
     payload = client.get_text(url)
 
     assert payload == "café"
+
+
+def test_source_client_try_get_json_returns_none_on_http_error(tmp_path: Path):
+    client = SourceClient(cache_dir=tmp_path / "cache")
+
+    def raise_404(_url: str):
+        raise urllib.error.HTTPError(_url, 404, "Not Found", hdrs=None, fp=None)
+
+    client._fetch_bytes = raise_404  # type: ignore[method-assign]
+
+    assert client.try_get_json("https://example.org/missing") is None

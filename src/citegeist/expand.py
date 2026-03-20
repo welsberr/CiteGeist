@@ -49,9 +49,11 @@ class CrossrefExpander:
         if not doi:
             return []
 
-        payload = self.resolver.source_client.get_json(
+        payload = self.resolver.source_client.try_get_json(
             f"https://api.crossref.org/works/{doi}?mailto=welsberr@gmail.com"
         )
+        if payload is None:
+            return []
         references = payload.get("message", {}).get("reference", [])
         results: list[ExpansionResult] = []
         for index, reference in enumerate(references, start=1):
@@ -141,7 +143,9 @@ class OpenAlexExpander:
 
         filter_name = "cited_by" if relation_type == "cites" else "cites"
         query = urlencode({"filter": f"{filter_name}:{openalex_id}", "per-page": limit})
-        payload = self.resolver.source_client.get_json(f"https://api.openalex.org/works?{query}")
+        payload = self.resolver.source_client.try_get_json(f"https://api.openalex.org/works?{query}")
+        if payload is None:
+            return []
         works = payload.get("results", [])
 
         results: list[ExpansionResult] = []
@@ -190,7 +194,9 @@ class OpenAlexExpander:
         if not doi:
             return None
         query = urlencode({"filter": f"doi:https://doi.org/{doi}"})
-        payload = self.resolver.source_client.get_json(f"https://api.openalex.org/works?{query}")
+        payload = self.resolver.source_client.try_get_json(f"https://api.openalex.org/works?{query}")
+        if payload is None:
+            return None
         results = payload.get("results", [])
         if not results:
             return None
@@ -326,9 +332,11 @@ class TopicExpander:
         if entry is None or not entry.get("doi"):
             return []
         doi = str(entry["doi"])
-        payload = self.crossref_expander.resolver.source_client.get_json(
+        payload = self.crossref_expander.resolver.source_client.try_get_json(
             f"https://api.crossref.org/works/{doi}?mailto=welsberr@gmail.com"
         )
+        if payload is None:
+            return []
         references = payload.get("message", {}).get("reference", [])[:limit]
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for index, reference in enumerate(references, start=1):
@@ -362,7 +370,9 @@ class TopicExpander:
             return []
         filter_name = "cited_by" if relation_type == "cites" else "cites"
         query = urlencode({"filter": f"{filter_name}:{openalex_id}", "per-page": limit})
-        payload = self.openalex_expander.resolver.source_client.get_json(f"https://api.openalex.org/works?{query}")
+        payload = self.openalex_expander.resolver.source_client.try_get_json(f"https://api.openalex.org/works?{query}")
+        if payload is None:
+            return []
         works = payload.get("results", [])
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for work in works:

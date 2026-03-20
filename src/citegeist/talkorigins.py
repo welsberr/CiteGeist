@@ -781,7 +781,10 @@ class TalkOriginsScraper:
         limit_topics: int | None = None,
         resume: bool = True,
     ) -> list[TalkOriginsTopic]:
-        index_html = self.source_client.get_text(base_url)
+        fetch_text = getattr(self.source_client, "try_get_text", self.source_client.get_text)
+        index_html = fetch_text(base_url)
+        if index_html is None:
+            return []
         parser = _TopicIndexParser(base_url)
         parser.feed(index_html)
 
@@ -793,7 +796,9 @@ class TalkOriginsScraper:
             if snapshot is not None:
                 raw_entries = list(snapshot.get("raw_entries", []))
             else:
-                page_html = self.source_client.get_text(link["url"])
+                page_html = fetch_text(link["url"])
+                if page_html is None:
+                    continue
                 topic_parser = _TopicPageParser()
                 topic_parser.feed(page_html)
                 raw_entries = normalize_topic_entries(topic_parser.preformatted_text())

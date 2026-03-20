@@ -41,7 +41,9 @@ class OaiPmhHarvester:
         self.source_client = source_client or SourceClient()
 
     def identify(self, base_url: str) -> dict[str, str]:
-        root = self.source_client.get_xml(f"{base_url}?{urlencode({'verb': 'Identify'})}")
+        root = self.source_client.try_get_xml(f"{base_url}?{urlencode({'verb': 'Identify'})}")
+        if root is None:
+            return {}
         identify = root.find(".//oai:Identify", NS)
         if identify is None:
             return {}
@@ -59,7 +61,9 @@ class OaiPmhHarvester:
         return payload
 
     def list_sets(self, base_url: str) -> list[OaiSet]:
-        root = self.source_client.get_xml(f"{base_url}?{urlencode({'verb': 'ListSets'})}")
+        root = self.source_client.try_get_xml(f"{base_url}?{urlencode({'verb': 'ListSets'})}")
+        if root is None:
+            return []
         sets = root.findall(".//oai:set", NS)
         results: list[OaiSet] = []
         for node in sets:
@@ -76,7 +80,9 @@ class OaiPmhHarvester:
         params = {"verb": "ListMetadataFormats"}
         if identifier:
             params["identifier"] = identifier
-        root = self.source_client.get_xml(f"{base_url}?{urlencode(params)}")
+        root = self.source_client.try_get_xml(f"{base_url}?{urlencode(params)}")
+        if root is None:
+            return []
         formats = root.findall(".//oai:metadataFormat", NS)
         results: list[OaiMetadataFormat] = []
         for node in formats:
@@ -110,7 +116,9 @@ class OaiPmhHarvester:
         ordinal = 1
         next_url = f"{base_url}?{urlencode(params)}"
         while next_url:
-            root = self.source_client.get_xml(next_url)
+            root = self.source_client.try_get_xml(next_url)
+            if root is None:
+                break
             records = root.findall(".//oai:record", NS)
             for record in records:
                 parsed = self._record_to_result(base_url, record, ordinal)
@@ -133,7 +141,9 @@ class OaiPmhHarvester:
             "metadataPrefix": metadata_prefix,
             "identifier": identifier,
         }
-        root = self.source_client.get_xml(f"{base_url}?{urlencode(params)}")
+        root = self.source_client.try_get_xml(f"{base_url}?{urlencode(params)}")
+        if root is None:
+            return None
         record = root.find(".//oai:record", NS)
         if record is None:
             return None

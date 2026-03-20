@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -44,6 +45,24 @@ class SourceClient:
         payload = self._fetch_bytes(url)
         self._write_cache(url, "xml", payload)
         return ET.fromstring(payload)
+
+    def try_get_json(self, url: str) -> dict | None:
+        try:
+            return self.get_json(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+            return None
+
+    def try_get_text(self, url: str) -> str | None:
+        try:
+            return self.get_text(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+            return None
+
+    def try_get_xml(self, url: str) -> ET.Element | None:
+        try:
+            return self.get_xml(url)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ET.ParseError, ValueError):
+            return None
 
     def _fetch_bytes(self, url: str) -> bytes:
         with urllib.request.urlopen(self._request(url)) as response:
