@@ -164,7 +164,9 @@ PYTHONPATH=src .venv/bin/python -m citegeist duplicates-talkorigins talkorigins-
 PYTHONPATH=src .venv/bin/python -m citegeist duplicates-talkorigins talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only
 PYTHONPATH=src .venv/bin/python -m citegeist suggest-talkorigins-phrases talkorigins-out/talkorigins_manifest.json --output topic-phrases.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 stage-topic-phrases topic-phrases.json
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic-phrase-reviews --output topic-phrase-review.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 review-topic-phrase abiogenesis accepted --notes "curated from local corpus"
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 review-topic-phrases topic-phrase-review.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 apply-topic-phrases topic-phrases.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 enrich-talkorigins talkorigins-out/talkorigins_manifest.json --limit 20
 PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins-copy.sqlite3 enrich-talkorigins talkorigins-out/talkorigins_manifest.json --limit 5 --apply --allow-unsafe-search-matches
@@ -179,8 +181,11 @@ Use `duplicates-talkorigins` when you want to inspect specific clusters, filter 
 Use `suggest-talkorigins-phrases` to derive candidate stored expansion phrases from the existing TalkOrigins topic corpus itself. The output is deterministic JSON keyed by topic slug, with a suggested phrase plus the extracted keywords that drove it. This is a useful first pass before setting topic phrases in the database or editing generated batch jobs.
 
 Use `stage-topic-phrases` to load those suggestions into the database as review items. Staging stores the candidate in `suggested_phrase` and marks the topic `pending` without changing the active `expansion_phrase`.
-Use `review-topic-phrase` to accept or reject one staged suggestion in place. Accepting a suggestion copies it into `expansion_phrase`; rejecting it preserves the review state without changing the live phrase.
+Use `export-topic-phrase-reviews` to write an editable JSON template directly from the database for the currently staged suggestions. That gives you a round-trip path from DB review queue to file edits and back into `review-topic-phrases`.
+Use `review-topic-phrase` to accept or reject one staged suggestion in place. Accepting a suggestion copies it into `expansion_phrase` and clears it from the staged review queue; rejecting it preserves the staged suggestion together with its review state.
+Use `review-topic-phrases` when you want to apply many accept/reject decisions from one JSON file. Each item should carry `slug`, `status`, and optional `phrase` / `review_notes`.
 Use `apply-topic-phrases` when you want a direct patch path instead of the staged review flow. It accepts either the raw suggestion list or an object with a `topics` list, and will apply `suggested_phrase` or `phrase` to matching topic slugs immediately.
+Use `topic-phrase-reviews --phrase-review-status pending` when you want a compact audit view of unresolved staged suggestions, including both the current live phrase and the pending replacement.
 Use `enrich-talkorigins` when you want to target those weak canonical entries for resolver-based metadata upgrades before retrying graph expansion on imported topic slices.
 Use `review-talkorigins` when you want one JSON review artifact that combines weak canonical clusters with dry-run enrichment outcomes for manual cleanup.
 Use `expand-topic` when you already have both a topic phrase and a curated topic seed set in the database: it expands outward from the topic’s existing entries, then only assigns discovered works back to that topic if they clear a topic-relevance threshold. Write-enabled assignment is stricter than preview ranking: a candidate must clear the score threshold and show a non-generic title anchor to the topic phrase, so broad methods papers do not get attached just because their abstracts or related terms overlap. On large noisy topics, prefer `--seed-key` to restrict the run to just the trusted seed entries you want to expand from, and use `--preview` first to inspect discovered candidates and relevance scores before writing anything.

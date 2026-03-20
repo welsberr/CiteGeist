@@ -603,6 +603,43 @@ class BibliographyStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def list_topic_phrase_reviews(
+        self,
+        limit: int = 100,
+        phrase_review_status: str | None = None,
+    ) -> list[dict[str, object]]:
+        where = "WHERE t.suggested_phrase IS NOT NULL"
+        params: list[object] = []
+        if phrase_review_status is not None:
+            where += " AND t.phrase_review_status = ?"
+            params.append(phrase_review_status)
+        params.append(limit)
+        rows = self.connection.execute(
+            f"""
+            SELECT t.slug, t.name, t.expansion_phrase, t.suggested_phrase,
+                   t.phrase_review_status, t.phrase_review_notes,
+                   COUNT(et.entry_id) AS entry_count
+            FROM topics t
+            LEFT JOIN entry_topics et ON et.topic_id = t.id
+            {where}
+            GROUP BY t.id, t.slug, t.name, t.expansion_phrase, t.suggested_phrase,
+                     t.phrase_review_status, t.phrase_review_notes
+            ORDER BY
+                CASE t.phrase_review_status
+                    WHEN 'pending' THEN 0
+                    WHEN 'unreviewed' THEN 1
+                    WHEN 'rejected' THEN 2
+                    WHEN 'accepted' THEN 3
+                    ELSE 4
+                END,
+                t.name,
+                t.slug
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def set_topic_expansion_phrase(self, slug: str, expansion_phrase: str | None) -> bool:
         row = self.connection.execute(
             """
@@ -651,8 +688,10 @@ class BibliographyStore:
 
         suggested_phrase = topic.get("suggested_phrase")
         expansion_phrase = topic.get("expansion_phrase")
+        stored_suggested_phrase = suggested_phrase
         if review_status == "accepted":
             expansion_phrase = applied_phrase if applied_phrase is not None else suggested_phrase
+            stored_suggested_phrase = None
         elif applied_phrase is not None:
             expansion_phrase = applied_phrase
 
@@ -660,13 +699,14 @@ class BibliographyStore:
             """
             UPDATE topics
             SET expansion_phrase = ?,
+                suggested_phrase = ?,
                 phrase_review_status = ?,
                 phrase_review_notes = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE slug = ?
             RETURNING id
             """,
-            (expansion_phrase, review_status, review_notes, slug),
+            (expansion_phrase, stored_suggested_phrase, review_status, review_notes, slug),
         ).fetchone()
         self.connection.commit()
         return row is not None

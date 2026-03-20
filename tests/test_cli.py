@@ -797,7 +797,7 @@ def test_cli_can_review_topic_phrase(tmp_path: Path):
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["suggested_phrase"] == "graph networks biology"
+    assert payload["suggested_phrase"] is None
     assert payload["expansion_phrase"] == "graph networks biology"
     assert payload["phrase_review_status"] == "accepted"
     assert payload["phrase_review_notes"] == "curated and approved"
@@ -842,6 +842,172 @@ def test_cli_topics_can_filter_by_phrase_review_status(tmp_path: Path):
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     assert [topic["slug"] for topic in payload] == ["graph-methods"]
+
+
+def test_cli_can_list_topic_phrase_reviews(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.ensure_topic("abiogenesis", "Abiogenesis")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+        store.stage_topic_phrase_suggestion("abiogenesis", "abiogenesis life origin")
+        store.review_topic_phrase_suggestion("abiogenesis", "accepted")
+    finally:
+        store.close()
+
+    result = run_cli(tmp_path, "topic-phrase-reviews", "--phrase-review-status", "pending")
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert [review["slug"] for review in payload] == ["graph-methods"]
+    assert payload[0]["suggested_phrase"] == "graph networks biology"
+    assert payload[0]["phrase_review_status"] == "pending"
+
+
+def test_cli_can_review_topic_phrases_in_bulk(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.ensure_topic("abiogenesis", "Abiogenesis")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+        store.stage_topic_phrase_suggestion("abiogenesis", "abiogenesis life origin")
+    finally:
+        store.close()
+
+    review_path = tmp_path / "phrase-review.json"
+    review_path.write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "graph-methods",
+                    "status": "accepted",
+                    "review_notes": "good phrase",
+                },
+                {
+                    "slug": "abiogenesis",
+                    "status": "rejected",
+                    "review_notes": "too sparse",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_cli(tmp_path, "review-topic-phrases", str(review_path))
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload[0]["reviewed"] is True
+    assert payload[1]["reviewed"] is True
+
+    pending_result = run_cli(tmp_path, "topic-phrase-reviews", "--phrase-review-status", "pending")
+    assert pending_result.returncode == 0
+    assert json.loads(pending_result.stdout) == []
+
+    rejected_result = run_cli(tmp_path, "topic-phrase-reviews", "--phrase-review-status", "rejected")
+    assert rejected_result.returncode == 0
+    rejected_payload = json.loads(rejected_result.stdout)
+    assert [review["slug"] for review in rejected_payload] == ["abiogenesis"]
+
+    topics_result = run_cli(tmp_path, "topics", "--phrase-review-status", "accepted")
+    assert topics_result.returncode == 0
+    topics_payload = json.loads(topics_result.stdout)
+    assert [topic["slug"] for topic in topics_payload] == ["graph-methods"]
+
+
+def test_cli_can_export_topic_phrase_review_template(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    ingest = run_cli(tmp_path, "ingest", str(bib_path))
+    assert ingest.returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+        )
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+    finally:
+        store.close()
+
+    output_path = tmp_path / "topic-phrase-review.json"
+    result = run_cli(
+        tmp_path,
+        "export-topic-phrase-reviews",
+        "--output",
+        str(output_path),
+    )
+    assert result.returncode == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert [item["slug"] for item in payload] == ["graph-methods"]
+    assert payload[0]["current_expansion_phrase"] is None
+    assert payload[0]["suggested_phrase"] == "graph networks biology"
+    assert payload[0]["current_status"] == "pending"
+    assert payload[0]["status"] == ""
+    assert payload[0]["phrase"] == "graph networks biology"
 
 
 def test_cli_export_topic(tmp_path: Path):

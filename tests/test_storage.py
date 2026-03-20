@@ -307,7 +307,7 @@ def test_store_can_stage_and_review_topic_phrase_suggestion():
 
         reviewed = store.get_topic("graph-methods")
         assert reviewed is not None
-        assert reviewed["suggested_phrase"] == "graph networks biology"
+        assert reviewed["suggested_phrase"] is None
         assert reviewed["expansion_phrase"] == "graph networks biology"
         assert reviewed["phrase_review_status"] == "accepted"
         assert reviewed["phrase_review_notes"] == "looks good"
@@ -329,6 +329,52 @@ def test_store_can_filter_topics_by_phrase_review_status():
 
         assert [topic["slug"] for topic in pending_topics] == ["graph-methods"]
         assert [topic["slug"] for topic in accepted_topics] == ["abiogenesis"]
+    finally:
+        store.close()
+
+
+def test_store_can_list_topic_phrase_reviews():
+    store = BibliographyStore()
+    try:
+        store.ensure_topic("graph-methods", "Graph Methods")
+        store.ensure_topic("abiogenesis", "Abiogenesis")
+        store.ensure_topic("plain-topic", "Plain Topic")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+        store.stage_topic_phrase_suggestion("abiogenesis", "abiogenesis life origin")
+        store.review_topic_phrase_suggestion("abiogenesis", "accepted")
+
+        reviews = store.list_topic_phrase_reviews()
+        pending_reviews = store.list_topic_phrase_reviews(phrase_review_status="pending")
+
+        assert [review["slug"] for review in reviews] == ["graph-methods"]
+        assert reviews[0]["suggested_phrase"] == "graph networks biology"
+        assert reviews[0]["phrase_review_status"] == "pending"
+        assert [review["slug"] for review in pending_reviews] == ["graph-methods"]
+    finally:
+        store.close()
+
+
+def test_store_rejected_topic_phrase_stays_in_review_queue():
+    store = BibliographyStore()
+    try:
+        store.ensure_topic("graph-methods", "Graph Methods")
+        store.stage_topic_phrase_suggestion("graph-methods", "graph networks biology")
+
+        assert store.review_topic_phrase_suggestion(
+            "graph-methods",
+            "rejected",
+            review_notes="too broad",
+        ) is True
+
+        topic = store.get_topic("graph-methods")
+        assert topic is not None
+        assert topic["suggested_phrase"] == "graph networks biology"
+        assert topic["expansion_phrase"] is None
+        assert topic["phrase_review_status"] == "rejected"
+
+        reviews = store.list_topic_phrase_reviews()
+        assert [review["slug"] for review in reviews] == ["graph-methods"]
+        assert reviews[0]["phrase_review_status"] == "rejected"
     finally:
         store.close()
 

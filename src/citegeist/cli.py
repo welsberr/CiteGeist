@@ -298,6 +298,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional expansion phrase override to apply with the review decision",
     )
 
+    review_topic_phrases_parser = subparsers.add_parser(
+        "review-topic-phrases",
+        help="Apply topic phrase review decisions in bulk from JSON",
+    )
+    review_topic_phrases_parser.add_argument("input", help="Path to JSON file containing topic phrase review records")
+
     duplicates_talkorigins_parser = subparsers.add_parser(
         "duplicates-talkorigins",
         help="Inspect duplicate clusters in a generated TalkOrigins manifest",
@@ -399,6 +405,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--phrase-review-status",
         choices=["unreviewed", "pending", "accepted", "rejected"],
         help="Restrict topics to one stored phrase review state",
+    )
+
+    topic_phrase_reviews_parser = subparsers.add_parser(
+        "topic-phrase-reviews",
+        help="List staged topic phrase suggestions and their review state",
+    )
+    topic_phrase_reviews_parser.add_argument("--limit", type=int, default=100, help="Maximum reviews to list")
+    topic_phrase_reviews_parser.add_argument(
+        "--phrase-review-status",
+        choices=["unreviewed", "pending", "accepted", "rejected"],
+        help="Restrict results to one stored phrase review state",
+    )
+
+    export_topic_phrase_reviews_parser = subparsers.add_parser(
+        "export-topic-phrase-reviews",
+        help="Export an editable JSON review template for staged topic phrase suggestions",
+    )
+    export_topic_phrase_reviews_parser.add_argument("--limit", type=int, default=100, help="Maximum reviews to export")
+    export_topic_phrase_reviews_parser.add_argument(
+        "--phrase-review-status",
+        choices=["unreviewed", "pending", "accepted", "rejected"],
+        default="pending",
+        help="Restrict exported reviews to one stored phrase review state",
+    )
+    export_topic_phrase_reviews_parser.add_argument(
+        "--output",
+        help="Write the review template JSON to a file instead of stdout",
     )
 
     topic_entries_parser = subparsers.add_parser(
@@ -522,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_stage_topic_phrases(store, Path(args.input))
         if args.command == "review-topic-phrase":
             return _run_review_topic_phrase(store, args.topic_slug, args.status, args.notes, args.phrase)
+        if args.command == "review-topic-phrases":
+            return _run_review_topic_phrases(store, Path(args.input))
         if args.command == "duplicates-talkorigins":
             return _run_duplicates_talkorigins(
                 Path(args.manifest),
@@ -565,6 +600,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "topics":
             return _run_topics(store, args.limit, args.phrase_review_status)
+        if args.command == "topic-phrase-reviews":
+            return _run_topic_phrase_reviews(store, args.limit, args.phrase_review_status)
+        if args.command == "export-topic-phrase-reviews":
+            return _run_export_topic_phrase_reviews(store, args.limit, args.phrase_review_status, args.output)
         if args.command == "topic-entries":
             return _run_topic_entries(store, args.topic_slug, args.limit)
         if args.command == "export-topic":
@@ -1056,6 +1095,51 @@ def _run_review_topic_phrase(
     return 0
 
 
+def _run_review_topic_phrases(store: BibliographyStore, input_path: Path) -> int:
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        items = payload.get("topics", payload.get("items", []))
+    else:
+        items = payload
+    if not isinstance(items, list):
+        print("Topic phrase review JSON must be a list or an object with a 'topics' or 'items' list", file=sys.stderr)
+        return 1
+
+    results: list[dict[str, object]] = []
+    exit_code = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        slug = str(item.get("slug") or "")
+        status = str(item.get("status") or item.get("phrase_review_status") or "")
+        notes = item.get("review_notes")
+        phrase = item.get("phrase", item.get("expansion_phrase"))
+        if not slug or status not in {"accepted", "rejected"}:
+            continue
+        if notes is not None:
+            notes = str(notes)
+        if phrase is not None:
+            phrase = str(phrase)
+        reviewed = store.review_topic_phrase_suggestion(
+            slug,
+            review_status=status,
+            review_notes=notes,
+            applied_phrase=phrase,
+        )
+        if not reviewed:
+            exit_code = 1
+        results.append(
+            {
+                "slug": slug,
+                "phrase_review_status": status,
+                "expansion_phrase": phrase,
+                "reviewed": reviewed,
+            }
+        )
+    print(json.dumps(results, indent=2))
+    return exit_code
+
+
 def _run_duplicates_talkorigins(
     manifest_path: Path,
     limit: int,
@@ -1168,6 +1252,39 @@ def _run_apply_talkorigins_corrections(
 
 def _run_topics(store: BibliographyStore, limit: int, phrase_review_status: str | None) -> int:
     print(json.dumps(store.list_topics(limit=limit, phrase_review_status=phrase_review_status), indent=2))
+    return 0
+
+
+def _run_topic_phrase_reviews(store: BibliographyStore, limit: int, phrase_review_status: str | None) -> int:
+    print(json.dumps(store.list_topic_phrase_reviews(limit=limit, phrase_review_status=phrase_review_status), indent=2))
+    return 0
+
+
+def _run_export_topic_phrase_reviews(
+    store: BibliographyStore,
+    limit: int,
+    phrase_review_status: str | None,
+    output: str | None,
+) -> int:
+    items = store.list_topic_phrase_reviews(limit=limit, phrase_review_status=phrase_review_status)
+    payload = [
+        {
+            "slug": item["slug"],
+            "topic": item["name"],
+            "current_expansion_phrase": item.get("expansion_phrase"),
+            "suggested_phrase": item.get("suggested_phrase"),
+            "current_status": item.get("phrase_review_status"),
+            "review_notes": item.get("phrase_review_notes"),
+            "status": "",
+            "phrase": item.get("suggested_phrase"),
+        }
+        for item in items
+    ]
+    rendered = json.dumps(payload, indent=2)
+    if output:
+        Path(output).write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
     return 0
 
 
