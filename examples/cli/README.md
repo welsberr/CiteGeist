@@ -213,7 +213,7 @@ Re-enrich all current `@misc` entries with DOIs:
 
 When Crossref expansion only yields an unstructured citation blob without a DOI, citegeist now skips materializing that discovery instead of storing it as a weak `@misc` entry. Cleaner fallback cases that infer a more specific type, such as proceedings-like titles, are still admitted. Thesis and dissertation citation blobs are also normalized more aggressively so fallback `@phdthesis` entries keep the work title instead of the entire ProQuest-style citation string.
 
-OpenAlex expansion now applies the same kind of admission control before writing or previewing discoveries. DOI-backed discoveries prefer DOI-based citation keys, noisy webpage/export abstracts are dropped, generic venue-title stubs are rejected, and weak DOI-less article records that merely shadow an existing book/chapter/dissertation title in your store are suppressed instead of being materialized as parallel duplicates.
+OpenAlex expansion now applies the same kind of admission control before writing or previewing discoveries. DOI-backed discoveries prefer DOI-based citation keys, noisy webpage/export abstracts are dropped, generic venue-title stubs are rejected, and weak DOI-less article records that merely shadow an existing book/chapter/dissertation title in your store are suppressed instead of being materialized as parallel duplicates. Both OpenAlex and Crossref discovery also normalize some malformed upstream author strings so records like `J., Fogel L.` are stored in stable BibTeX form as `Fogel, L. J.`.
 
 ## Explore Citation Graphs
 

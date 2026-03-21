@@ -233,6 +233,20 @@ def test_crossref_reference_to_entry_extracts_title_from_thesis_citation_blob():
     )
 
 
+def test_crossref_reference_to_entry_normalizes_reversed_initial_author_name():
+    entry = _crossref_reference_to_entry(
+        {
+            "author": "J., Fogel L.",
+            "article-title": "Evolutionary Programming",
+            "year": "1995",
+        },
+        "seed2024",
+        1,
+    )
+
+    assert entry.fields["author"] == "Fogel, L. J."
+
+
 def test_crossref_expander_returns_empty_on_fetch_error():
     store = BibliographyStore()
     try:

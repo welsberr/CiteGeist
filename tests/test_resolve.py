@@ -208,6 +208,20 @@ def test_openalex_work_to_entry_maps_basic_fields():
     assert entry.fields["abstract"] == "OpenAlex resolved"
 
 
+def test_openalex_work_to_entry_normalizes_reversed_initial_author_name():
+    entry = _openalex_work_to_entry(
+        {
+            "id": "https://openalex.org/W12345",
+            "display_name": "Evolutionary Programming",
+            "publication_year": 1995,
+            "type": "book-chapter",
+            "authorships": [{"author": {"display_name": "J., Fogel L."}}],
+        }
+    )
+
+    assert entry.fields["author"] == "Fogel, L. J."
+
+
 def test_resolver_can_resolve_openalex_id():
     resolver = MetadataResolver()
     resolver.source_client.get_json = lambda _url: {  # type: ignore[method-assign]

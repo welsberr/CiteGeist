@@ -471,7 +471,7 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
 
 def _openalex_author_name(authorship: dict) -> str:
     author = authorship.get("author") or {}
-    return " ".join(str(author.get("display_name", "")).split())
+    return _normalize_person_display_name(str(author.get("display_name", "")))
 
 
 def _openalex_abstract_text(inverted_index: dict) -> str:
@@ -511,6 +511,41 @@ def _normalize_openalex_doi(value: str | None) -> str:
 def _normalize_text(value: str) -> str:
     without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
     return " ".join(without_tags.split())
+
+
+def _normalize_person_display_name(value: str) -> str:
+    normalized = _normalize_text(value)
+    if "," not in normalized:
+        return normalized
+
+    left, right = [part.strip() for part in normalized.split(",", 1)]
+    if not (_looks_like_initial_block(left) and right):
+        return normalized
+
+    right_tokens = right.split()
+    trailing_initials: list[str] = []
+    while right_tokens and _looks_like_initial_block(right_tokens[-1]):
+        trailing_initials.insert(0, right_tokens.pop())
+    if not right_tokens:
+        return normalized
+
+    family = " ".join(right_tokens).strip()
+    given_parts = [
+        _initial_block_to_given_names(" ".join(trailing_initials)),
+        _initial_block_to_given_names(left),
+    ]
+    given = " ".join(part for part in given_parts if part).strip()
+    return f"{family}, {given}" if given else family
+
+
+def _looks_like_initial_block(value: str) -> bool:
+    letters = re.sub(r"[^A-Za-z]+", "", value)
+    return 0 < len(letters) <= 4 and letters.upper() == letters
+
+
+def _initial_block_to_given_names(value: str) -> str:
+    letters = re.findall(r"[A-Za-z]", value)
+    return " ".join(f"{letter.upper()}." for letter in letters)
 
 
 def _openalex_citation_key(doi: str, openalex_id: str, authors: str, year: str, title: str) -> str:

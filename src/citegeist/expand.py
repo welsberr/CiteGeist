@@ -417,7 +417,7 @@ class TopicExpander:
 def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordinal: int) -> BibEntry:
     title = _crossref_reference_title(reference, ordinal)
     year = str(reference.get("year") or "")
-    author = reference.get("author") or ""
+    author = _normalize_person_display_name(str(reference.get("author") or ""))
     doi = reference.get("DOI") or ""
     journal_title = reference.get("journal-title") or ""
 
@@ -428,7 +428,7 @@ def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordi
     if year:
         fields["year"] = year
     if author:
-        fields["author"] = _normalize_text(author)
+        fields["author"] = author
     if doi:
         fields["doi"] = doi
         fields["url"] = f"https://doi.org/{doi}"
@@ -529,6 +529,41 @@ def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int
 def _normalize_text(value: str) -> str:
     without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
     return " ".join(without_tags.split())
+
+
+def _normalize_person_display_name(value: str) -> str:
+    normalized = _normalize_text(value)
+    if "," not in normalized:
+        return normalized
+
+    left, right = [part.strip() for part in normalized.split(",", 1)]
+    if not (_looks_like_initial_block(left) and right):
+        return normalized
+
+    right_tokens = right.split()
+    trailing_initials: list[str] = []
+    while right_tokens and _looks_like_initial_block(right_tokens[-1]):
+        trailing_initials.insert(0, right_tokens.pop())
+    if not right_tokens:
+        return normalized
+
+    family = " ".join(right_tokens).strip()
+    given_parts = [
+        _initial_block_to_given_names(" ".join(trailing_initials)),
+        _initial_block_to_given_names(left),
+    ]
+    given = " ".join(part for part in given_parts if part).strip()
+    return f"{family}, {given}" if given else family
+
+
+def _looks_like_initial_block(value: str) -> bool:
+    letters = re.sub(r"[^A-Za-z]+", "", value)
+    return 0 < len(letters) <= 4 and letters.upper() == letters
+
+
+def _initial_block_to_given_names(value: str) -> str:
+    letters = re.findall(r"[A-Za-z]", value)
+    return " ".join(f"{letter.upper()}." for letter in letters)
 
 
 def _crossref_reference_entry_type(reference: dict, title: str, journal_title: str) -> str:
@@ -695,7 +730,7 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
 def _openalex_author_name(authorship: dict) -> str:
     author = authorship.get("author") or {}
     name = author.get("display_name", "")
-    return _normalize_text(name)
+    return _normalize_person_display_name(str(name))
 
 
 def _openalex_abstract_text(inverted_index: dict) -> str:
