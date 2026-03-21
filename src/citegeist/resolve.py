@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import urllib.error
 import urllib.parse
@@ -433,7 +434,7 @@ def _make_resolution_key(author_text: str, year: str, title: str) -> str:
 
 
 def _openalex_work_to_entry(work: dict) -> BibEntry:
-    title = work.get("display_name", "") or "Untitled work"
+    title = _normalize_text(work.get("display_name", "") or "Untitled work")
     year = str(work.get("publication_year") or "")
     doi = _normalize_openalex_doi(work.get("doi"))
     openalex_id = _normalize_openalex_id(work.get("id", ""))
@@ -455,14 +456,16 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
         fields["openalex"] = openalex_id
         fields.setdefault("url", f"https://openalex.org/{openalex_id}")
     if abstract := work.get("abstract_inverted_index"):
-        fields["abstract"] = _openalex_abstract_text(abstract)
+        abstract_text = _openalex_abstract_text(abstract)
+        if abstract_text:
+            fields["abstract"] = abstract_text
     if source:
         if work_type == "article":
             fields["journal"] = source
         else:
             fields["booktitle"] = source
 
-    citation_key = f"openalex{re.sub(r'[^A-Za-z0-9]+', '', openalex_id).lower()}" if openalex_id else _make_resolution_key(authors or "openalex", year or "n.d.", title or "untitled")
+    citation_key = _openalex_citation_key(doi, openalex_id, authors, year, title)
     return BibEntry(entry_type=_openalex_type_to_bibtype(work_type), citation_key=citation_key, fields=fields)
 
 
@@ -476,7 +479,8 @@ def _openalex_abstract_text(inverted_index: dict) -> str:
     for word, indexes in inverted_index.items():
         for index in indexes:
             positions[int(index)] = word
-    return " ".join(word for _, word in sorted(positions.items()))
+    text = _normalize_text(" ".join(word for _, word in sorted(positions.items())))
+    return "" if _looks_like_openalex_page_blob(text) else text
 
 
 def _openalex_type_to_bibtype(work_type: str) -> str:
@@ -502,6 +506,37 @@ def _normalize_openalex_doi(value: str | None) -> str:
     if value.startswith("https://doi.org/"):
         return value[len("https://doi.org/") :]
     return value
+
+
+def _normalize_text(value: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
+    return " ".join(without_tags.split())
+
+
+def _openalex_citation_key(doi: str, openalex_id: str, authors: str, year: str, title: str) -> str:
+    if doi:
+        suffix = re.sub(r"[^A-Za-z0-9]+", "", doi).lower()
+        return f"doi{suffix}"
+    if openalex_id:
+        return f"openalex{re.sub(r'[^A-Za-z0-9]+', '', openalex_id).lower()}"
+    return _make_resolution_key(authors or "openalex", year or "n.d.", title or "untitled")
+
+
+def _looks_like_openalex_page_blob(text: str) -> bool:
+    lowered = text.casefold()
+    blob_markers = (
+        "research article|",
+        "download citation file",
+        "this content is only available via pdf",
+        "get citation alerts",
+        "views icon",
+        "toolbar search",
+        "publisher site get access",
+        "authors info & claims",
+        "publication history",
+        "copyright ",
+    )
+    return len(text) > 60 and any(marker in lowered for marker in blob_markers)
 
 
 def _normalize_match_text(value: str) -> str:

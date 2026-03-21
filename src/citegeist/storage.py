@@ -454,6 +454,40 @@ class BibliographyStore:
         payload["topics"] = self.get_entry_topics(citation_key)
         return payload
 
+    def find_entry_by_identifier(self, scheme: str, value: str) -> dict[str, object] | None:
+        row = self.connection.execute(
+            """
+            SELECT e.*
+            FROM identifiers i
+            JOIN entries e ON e.id = i.entry_id
+            WHERE i.scheme = ? AND i.value = ?
+            LIMIT 1
+            """,
+            (scheme, value),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = self._row_to_entry_dict(row)
+        payload["topics"] = self.get_entry_topics(str(row["citation_key"]))
+        return payload
+
+    def find_entries_by_title(self, title: str) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM entries
+            WHERE trim(lower(title)) = trim(lower(?))
+            ORDER BY citation_key
+            """,
+            (title,),
+        ).fetchall()
+        payloads: list[dict[str, object]] = []
+        for row in rows:
+            payload = self._row_to_entry_dict(row)
+            payload["topics"] = self.get_entry_topics(str(row["citation_key"]))
+            payloads.append(payload)
+        return payloads
+
     def list_entries(self, limit: int = 50) -> list[dict[str, object]]:
         rows = self.connection.execute(
             """

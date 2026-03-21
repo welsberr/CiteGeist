@@ -211,6 +211,28 @@ def test_crossref_expander_keeps_simple_unstructured_title_without_identifier():
         store.close()
 
 
+def test_crossref_reference_to_entry_extracts_title_from_thesis_citation_blob():
+    entry = _crossref_reference_to_entry(
+        {
+            "unstructured": (
+                "Johnson WR. Evolution in action in the classroom: Engaging students in scientific "
+                "practices to develop a conceptual understanding of natural selection "
+                "(Master’s thesis). ProQuest Dissertations and Theses database. "
+                "(UMI No. 1517061). 2012."
+            ),
+            "year": "2012",
+        },
+        "seed2024",
+        1,
+    )
+
+    assert entry.entry_type == "phdthesis"
+    assert entry.fields["title"] == (
+        "Evolution in action in the classroom: Engaging students in scientific "
+        "practices to develop a conceptual understanding of natural selection"
+    )
+
+
 def test_crossref_expander_returns_empty_on_fetch_error():
     store = BibliographyStore()
     try:

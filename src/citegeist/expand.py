@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from urllib.parse import quote, urlencode
@@ -157,9 +158,15 @@ class OpenAlexExpander:
 
         results: list[ExpansionResult] = []
         for work in works:
+            if _skip_openalex_work(work):
+                continue
             discovered = _openalex_work_to_entry(work)
+            existing_key = _existing_entry_key_for_discovered_work(store, discovered)
+            if existing_key is None and _skip_openalex_review_like_duplicate(store, discovered):
+                continue
+            target_key = existing_key or discovered.citation_key
             created = False
-            if store.get_entry(discovered.citation_key) is None:
+            if existing_key is None and store.get_entry(discovered.citation_key) is None:
                 store.upsert_entry(
                     discovered,
                     raw_bibtex=None,
@@ -172,9 +179,8 @@ class OpenAlexExpander:
 
             if relation_type == "cites":
                 source_key = citation_key
-                target_key = discovered.citation_key
             else:
-                source_key = discovered.citation_key
+                source_key = target_key
                 target_key = citation_key
 
             store.add_relation(
@@ -188,7 +194,7 @@ class OpenAlexExpander:
             results.append(
                 ExpansionResult(
                     source_citation_key=source_key,
-                    discovered_citation_key=discovered.citation_key,
+                    discovered_citation_key=target_key,
                     created_entry=created,
                     relation_type=relation_type,
                     source_label=f"openalex:{relation_type}:{openalex_id}",
@@ -385,14 +391,20 @@ class TopicExpander:
         works = payload.get("results", [])
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for work in works:
+            if _skip_openalex_work(work):
+                continue
             discovered = _openalex_work_to_entry(work)
-            source_key = citation_key if relation_type == "cites" else discovered.citation_key
+            existing_key = _existing_entry_key_for_discovered_work(store, discovered)
+            if existing_key is None and _skip_openalex_review_like_duplicate(store, discovered):
+                continue
+            target_key = existing_key or discovered.citation_key
+            source_key = citation_key if relation_type == "cites" else target_key
             rows.append(
                 (
                     ExpansionResult(
                         source_citation_key=source_key,
-                        discovered_citation_key=discovered.citation_key,
-                        created_entry=store.get_entry(discovered.citation_key) is None,
+                        discovered_citation_key=target_key,
+                        created_entry=existing_key is None and store.get_entry(discovered.citation_key) is None,
                         relation_type=relation_type,
                         source_label=f"openalex:{relation_type}:{openalex_id}",
                     ),
@@ -403,13 +415,7 @@ class TopicExpander:
 
 
 def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordinal: int) -> BibEntry:
-    title = (
-        reference.get("article-title")
-        or reference.get("volume-title")
-        or reference.get("journal-title")
-        or reference.get("unstructured")
-        or f"Referenced work {ordinal}"
-    )
+    title = _crossref_reference_title(reference, ordinal)
     year = str(reference.get("year") or "")
     author = reference.get("author") or ""
     doi = reference.get("DOI") or ""
@@ -432,6 +438,42 @@ def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordi
     citation_key = _reference_citation_key(reference, title, year, ordinal)
     entry_type = _crossref_reference_entry_type(reference, title, journal_title)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
+
+
+def _crossref_reference_title(reference: dict, ordinal: int) -> str:
+    raw_title = (
+        reference.get("article-title")
+        or reference.get("volume-title")
+        or reference.get("journal-title")
+        or _extract_crossref_unstructured_title(str(reference.get("unstructured") or ""))
+        or f"Referenced work {ordinal}"
+    )
+    return _normalize_text(raw_title)
+
+
+def _extract_crossref_unstructured_title(text: str) -> str:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ""
+
+    thesis_markers = (
+        "(Master",
+        "(Doctoral",
+        "PhD dissertation",
+        "Master's thesis",
+        "Master’s thesis",
+        "Doctoral dissertation",
+    )
+    for marker in thesis_markers:
+        if marker in normalized:
+            normalized = normalized.split(marker, 1)[0].strip(" .")
+            break
+    for marker in (" ProQuest", " UMI No.", " Dissertation Abstracts", " University Microfilms"):
+        if marker in normalized:
+            normalized = normalized.split(marker, 1)[0].strip(" .")
+    if any(marker in text for marker in thesis_markers) and ". " in normalized:
+        normalized = normalized.split(". ", 1)[1].strip()
+    return normalized.strip(" .")
 
 
 def _skip_crossref_reference(reference: dict, entry: BibEntry) -> bool:
@@ -485,7 +527,8 @@ def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int
 
 
 def _normalize_text(value: str) -> str:
-    return " ".join(value.split())
+    without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
+    return " ".join(without_tags.split())
 
 
 def _crossref_reference_entry_type(reference: dict, title: str, journal_title: str) -> str:
@@ -635,14 +678,16 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
     if openalex_id:
         fields["openalex"] = openalex_id
     if abstract := work.get("abstract_inverted_index"):
-        fields["abstract"] = _openalex_abstract_text(abstract)
+        abstract_text = _openalex_abstract_text(abstract)
+        if abstract_text:
+            fields["abstract"] = abstract_text
     if source:
         if work_type == "article":
             fields["journal"] = source
         else:
             fields["booktitle"] = source
 
-    citation_key = _openalex_citation_key(openalex_id, authors, year, title)
+    citation_key = _openalex_citation_key(doi, openalex_id, authors, year, title)
     entry_type = _openalex_type_to_bibtype(work_type)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
 
@@ -658,7 +703,8 @@ def _openalex_abstract_text(inverted_index: dict) -> str:
     for word, indexes in inverted_index.items():
         for index in indexes:
             positions[int(index)] = word
-    return " ".join(word for _, word in sorted(positions.items()))
+    text = _normalize_text(" ".join(word for _, word in sorted(positions.items())))
+    return "" if _looks_like_openalex_page_blob(text) else text
 
 
 def _openalex_type_to_bibtype(work_type: str) -> str:
@@ -672,13 +718,114 @@ def _openalex_type_to_bibtype(work_type: str) -> str:
     return mapping.get(work_type, "misc")
 
 
-def _openalex_citation_key(openalex_id: str, authors: str, year: str, title: str) -> str:
+def _openalex_citation_key(doi: str, openalex_id: str, authors: str, year: str, title: str) -> str:
+    if doi:
+        suffix = re.sub(r"[^A-Za-z0-9]+", "", doi).lower()
+        return f"doi{suffix}"
     if openalex_id:
         return f"openalex{re.sub(r'[^A-Za-z0-9]+', '', openalex_id).lower()}"
     author = authors.split(" and ")[0] if authors else "ref"
     family = re.sub(r"[^A-Za-z0-9]+", "", author.split()[-1]).lower() or "ref"
     first_word = re.sub(r"[^A-Za-z0-9]+", "", title.split()[0]).lower() if title.split() else "untitled"
     return f"{family}{year or 'nd'}{first_word}"
+
+
+def _looks_like_openalex_page_blob(text: str) -> bool:
+    lowered = text.casefold()
+    blob_markers = (
+        "research article|",
+        "download citation file",
+        "this content is only available via pdf",
+        "get citation alerts",
+        "views icon",
+        "toolbar search",
+        "publisher site get access",
+        "authors info & claims",
+        "publication history",
+        "copyright ",
+    )
+    return len(text) > 60 and any(marker in lowered for marker in blob_markers)
+
+
+def _skip_openalex_work(work: dict) -> bool:
+    title = _normalize_text(str(work.get("display_name", "") or ""))
+    if not title or title.casefold() == "untitled work":
+        return True
+
+    work_type = str(work.get("type", "") or "")
+    doi = _normalize_openalex_doi(work.get("doi"))
+    source = _normalize_text(str(((work.get("primary_location") or {}).get("source") or {}).get("display_name", "") or ""))
+    abstract = _openalex_abstract_text(work.get("abstract_inverted_index") or {}) if work.get("abstract_inverted_index") else ""
+
+    if not doi and _looks_like_container_title(title, source):
+        return True
+    if not doi and not abstract and _looks_like_generic_reference_title(title, work_type):
+        return True
+    return False
+
+
+def _looks_like_container_title(title: str, source: str) -> bool:
+    if not title or not source:
+        return False
+    normalized_title = re.sub(r"[^a-z0-9]+", "", title.casefold())
+    normalized_source = re.sub(r"[^a-z0-9]+", "", source.casefold())
+    return bool(normalized_title) and normalized_title == normalized_source
+
+
+def _looks_like_generic_reference_title(title: str, work_type: str) -> bool:
+    lowered = title.casefold()
+    generic_exact = {
+        "blood",
+        "cladistics",
+        "leukemia",
+        "springer",
+        "addison-wesley",
+        "physica d",
+        "molecular biology and evolution",
+        "lecture notes in artificial intelligence",
+        "artificial life ii",
+        "mcgill j educ",
+        "j coll sci teach",
+    }
+    if lowered in generic_exact:
+        return True
+    if work_type in {"book", "book-chapter", "dissertation"}:
+        return False
+    return bool(re.fullmatch(r"(?:[A-Z][a-z]?\.?\s*){1,4}", title))
+
+
+def _existing_entry_key_for_discovered_work(store: BibliographyStore, entry: BibEntry) -> str | None:
+    doi = entry.fields.get("doi")
+    if doi:
+        existing = store.find_entry_by_identifier("doi", doi)
+        if existing is not None:
+            return str(existing["citation_key"])
+    openalex_id = entry.fields.get("openalex")
+    if openalex_id:
+        existing = store.find_entry_by_identifier("openalex", openalex_id)
+        if existing is not None:
+            return str(existing["citation_key"])
+    return None
+
+
+def _skip_openalex_review_like_duplicate(store: BibliographyStore, entry: BibEntry) -> bool:
+    if entry.entry_type != "article":
+        return False
+    if entry.fields.get("abstract"):
+        return False
+
+    title = _normalize_text(str(entry.fields.get("title") or ""))
+    if not title:
+        return False
+
+    for existing in store.find_entries_by_title(title):
+        existing_key = str(existing.get("citation_key") or "")
+        if existing_key == entry.citation_key:
+            continue
+        existing_type = str(existing.get("entry_type") or "")
+        if existing_type in {"book", "incollection", "inproceedings", "phdthesis"}:
+            return True
+    return False
 
 
 def _normalize_openalex_id(value: str) -> str:

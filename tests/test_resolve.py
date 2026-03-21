@@ -201,7 +201,7 @@ def test_openalex_work_to_entry_maps_basic_fields():
         }
     )
 
-    assert entry.citation_key == "openalexw12345"
+    assert entry.citation_key == "doi101000exampleopenalex"
     assert entry.fields["openalex"] == "W12345"
     assert entry.fields["doi"] == "10.1000/example-openalex"
     assert entry.fields["journal"] == "Journal of Open Graphs"
