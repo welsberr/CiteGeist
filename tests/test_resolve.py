@@ -1,7 +1,7 @@
 from xml.etree import ElementTree as ET
 import urllib.error
 
-from citegeist.bibtex import BibEntry, render_bibtex
+from citegeist.bibtex import BibEntry, parse_bibtex, render_bibtex
 from citegeist.resolve import (
     MetadataResolver,
     _arxiv_atom_entry_to_bib,
@@ -483,3 +483,23 @@ def test_render_bibtex_tolerates_unmatched_braces_in_field_values():
     assert "@misc{broken2026," in rendered
     assert "Unmatched { braces } example ) tail" in rendered
     assert "Open ( brace only" in rendered
+
+
+def test_parse_and_render_do_not_double_escape_simple_bibtex_specials():
+    parsed = parse_bibtex(
+        """
+@misc{escaped2026,
+  title = "A \\& B",
+  note = "discovered\\_from = {doi10100718462821441}; confidence = 100\\%"
+}
+"""
+    )[0]
+
+    assert parsed.fields["title"] == "A & B"
+    assert parsed.fields["note"] == "discovered_from = {doi10100718462821441}; confidence = 100%"
+
+    rendered = render_bibtex([parsed])
+
+    assert 'title = "A \\& B"' in rendered
+    assert 'note = "discovered\\_from = {doi10100718462821441}; confidence = 100\\%"' in rendered
+    assert 'discovered\\\\_from' not in rendered

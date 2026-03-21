@@ -25,7 +25,7 @@ def parse_bibtex(text: str) -> list[BibEntry]:
     bibliography = parse_string(text, bib_format="bibtex")
     entries: list[BibEntry] = []
     for citation_key, entry in bibliography.entries.items():
-        fields = dict(entry.fields.items())
+        fields = {key: _normalize_parsed_bibtex_value(value) for key, value in entry.fields.items()}
         for role, persons in entry.persons.items():
             fields[role] = " and ".join(str(person) for person in persons)
         entries.append(
@@ -114,3 +114,13 @@ def _sanitize_bibtex_value(value: str) -> str:
 
 def _flatten_bibtex_braces(value: str) -> str:
     return value.replace("{", "(").replace("}", ")")
+
+
+def _normalize_parsed_bibtex_value(value: str) -> str:
+    return (
+        value.replace(r"\_", "_")
+        .replace(r"\&", "&")
+        .replace(r"\%", "%")
+        .replace(r"\$", "$")
+        .replace(r"\#", "#")
+    )
