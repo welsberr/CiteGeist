@@ -48,6 +48,7 @@ The initial repo includes:
 - a small CLI for ingest, search, inspection, and export;
 - review-state tracking on entries, per-field ingest provenance, and field-level conflict review;
 - plaintext reference extraction into draft BibTeX for numbered, APA-like, wrapped-line, and simple book-style references;
+- standalone verification and disambiguation of free-text references or partial BibTeX into auditable BibTeX/JSON results with `x_status`, `x_confidence`, `x_source`, `x_query`, and alternate-candidate traces;
 - identifier-first metadata resolution for DOI, OpenAlex, DBLP, arXiv, and DataCite-backed entries, with OpenAlex/DataCite title-search fallback;
 - local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
 - Crossref- and OpenAlex-backed graph expansion that materializes draft related works and edge provenance;
@@ -132,6 +133,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 apply-conflict
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --seed-bib seed.bib --topic "bayesian nonparametrics"
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --topic "bayesian nonparametrics" --preview --topic-commit-limit 5
 PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
+PYTHONPATH=src .venv/bin/python -m citegeist verify --string '"Graph-first bibliography augmentation" Smith 2024' --context "citation graphs" --format json
+PYTHONPATH=src .venv/bin/python -m citegeist verify --bib draft.bib --output verified.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25
@@ -166,6 +169,13 @@ Crossref reference expansion is intentionally conservative about weak discoverie
 OpenAlex expansion is also conservative about noisy secondary records. Discoveries now prefer DOI-based citation keys when a DOI is present, which reduces parallel `doi...` and `openalex...` entries for the same work. OpenAlex abstract imports are sanitized to drop obvious webpage/export blobs, and DOI-less records are filtered when they look like venue-title stubs, generic container records, or weak review-like shadows of an already present book, chapter, proceedings paper, or dissertation with the same title. Both OpenAlex and Crossref discovery paths also normalize some malformed author strings from upstream metadata, including inverted-initial patterns such as `J., Fogel L.`, into stable BibTeX names like `Fogel, L. J.`. Preview mode uses the same admission rules as write-enabled expansion, so rejected candidates disappear before you commit them to the store.
 
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
+
+## Adopted Ideas From Earlier Repos
+
+`citegeist` now absorbs two useful patterns from adjacent bibliography tools while keeping them inside the main Python 3 package boundary:
+
+- From `VeriBib`: a standalone `verify` workflow for ambiguous strings or rough BibTeX, with explicit confidence/status audit fields and alternate-candidate traces before you commit changes to the main library.
+- From `TOA-Bib-Updater`: resumable, artifact-oriented corpus processing remains the preferred process model for large imports. In practice this already appears in the TalkOrigins example pipeline through saved manifests, review exports, duplicate reports, and staged topic-phrase review flows.
 
 ## Example Application
 

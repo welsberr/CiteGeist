@@ -16,6 +16,7 @@ from .extract import extract_references
 from .harvest import OaiPmhHarvester
 from .resolve import MetadataResolver, merge_entries_with_conflicts
 from .storage import BibliographyStore
+from .verify import BibliographyVerifier, render_verification_results
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +69,24 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser = subparsers.add_parser("extract", help="Extract draft BibTeX from plaintext references")
     extract_parser.add_argument("input", help="Plaintext file containing bibliography-style references")
     extract_parser.add_argument("--output", help="Write extracted BibTeX to a file instead of stdout")
+
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify or disambiguate free-text references or BibTeX entries without modifying the database",
+    )
+    verify_group = verify_parser.add_mutually_exclusive_group(required=True)
+    verify_group.add_argument("--string", help="Single free-text reference query")
+    verify_group.add_argument("--list", dest="list_input", help="Path to a text file with one query per line")
+    verify_group.add_argument("--bib", help="Path to a BibTeX file whose entries should be verified")
+    verify_parser.add_argument("--context", default="", help="Optional topic context used for scoring")
+    verify_parser.add_argument("--limit", type=int, default=5, help="Maximum candidates to inspect per input")
+    verify_parser.add_argument(
+        "--format",
+        choices=["bibtex", "json"],
+        default="bibtex",
+        help="Output format for verification results",
+    )
+    verify_parser.add_argument("--output", help="Write verification results to a file instead of stdout")
 
     resolve_parser = subparsers.add_parser("resolve", help="Enrich stored entries from external metadata sources")
     resolve_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
@@ -535,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_apply_conflict(store, args.citation_key, args.field_name)
         if args.command == "extract":
             return _run_extract(Path(args.input), args.output)
+        if args.command == "verify":
+            return _run_verify(args.string, args.list_input, args.bib, args.context, args.limit, args.format, args.output)
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
         if args.command == "resolve-stubs":
@@ -777,6 +798,36 @@ def _run_extract(input_path: Path, output: str | None) -> int:
     rendered = render_bibtex(entries)
     if output:
         Path(output).write_text(rendered + ("\n" if rendered else ""), encoding="utf-8")
+    else:
+        if rendered:
+            print(rendered)
+    return 0
+
+
+def _run_verify(
+    string_input: str | None,
+    list_input: str | None,
+    bib_input: str | None,
+    context: str,
+    limit: int,
+    output_format: str,
+    output: str | None,
+) -> int:
+    verifier = BibliographyVerifier()
+    if string_input is not None:
+        results = [verifier.verify_string(string_input, context=context, limit=limit)]
+    elif list_input is not None:
+        values = [line.strip() for line in Path(list_input).read_text(encoding="utf-8").splitlines() if line.strip()]
+        results = verifier.verify_strings(values, context=context, limit=limit)
+    elif bib_input is not None:
+        results = verifier.verify_bib_file(bib_input, context=context, limit=limit)
+    else:
+        print("verify requires one input source", file=sys.stderr)
+        return 1
+
+    rendered = render_verification_results(results, output_format)
+    if output:
+        Path(output).write_text(rendered + ("\n" if rendered and not rendered.endswith("\n") else ""), encoding="utf-8")
     else:
         if rendered:
             print(rendered)

@@ -138,6 +138,115 @@ def test_cli_provenance_and_status_updates(tmp_path: Path):
     assert "reviewed" in status.stdout
 
 
+def test_cli_verify_string_outputs_json_with_audit_fields(tmp_path: Path):
+    from citegeist.bibtex import BibEntry
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.BibliographyVerifier.verify_string") as mocked_verify:
+        from citegeist.verify import VerificationResult
+
+        mocked_verify.return_value = VerificationResult(
+            query='"Graph-first bibliography augmentation" Smith 2024',
+            context="citation graphs",
+            status="high_confidence",
+            confidence=0.82,
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="smith2024graphs",
+                fields={
+                    "author": "Smith, Jane",
+                    "title": "Graph-first bibliography augmentation",
+                    "year": "2024",
+                    "doi": "10.1000/example-doi",
+                },
+            ),
+            source_label="crossref:search:Graph-first bibliography augmentation",
+            alternates=[],
+            input_type="string",
+            input_key=None,
+        )
+
+        stdout_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer):
+            exit_code = main(
+                [
+                    "--db",
+                    str(database),
+                    "verify",
+                    "--string",
+                    '"Graph-first bibliography augmentation" Smith 2024',
+                    "--context",
+                    "citation graphs",
+                    "--format",
+                    "json",
+                ]
+            )
+
+    assert exit_code == 0
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload[0]["status"] == "high_confidence"
+    assert payload[0]["source_label"] == "crossref:search:Graph-first bibliography augmentation"
+    assert payload[0]["entry"]["citation_key"] == "smith2024graphs"
+
+
+def test_cli_verify_bib_outputs_json(tmp_path: Path):
+    bib_path = tmp_path / "partial.bib"
+    bib_path.write_text(
+        """
+@misc{roughentry,
+  title = {Graph-first bibliography augmentation},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+
+    with patch("citegeist.cli.BibliographyVerifier.verify_bib_file") as mocked_verify:
+        from citegeist.bibtex import BibEntry
+        from citegeist.verify import VerificationResult
+
+        mocked_verify.return_value = [
+            VerificationResult(
+                query="Graph-first bibliography augmentation 2024",
+                context="",
+                status="ambiguous",
+                confidence=0.61,
+                entry=BibEntry(
+                    entry_type="article",
+                    citation_key="candidate2024",
+                    fields={
+                        "title": "Graph-first bibliography augmentation",
+                        "year": "2024",
+                    },
+                ),
+                source_label="openalex:search:Graph-first bibliography augmentation",
+                alternates=[],
+                input_type="bib",
+                input_key="roughentry",
+            )
+        ]
+
+        stdout_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer):
+            exit_code = main(
+                [
+                    "--db",
+                    str(tmp_path / "library.sqlite3"),
+                    "verify",
+                    "--bib",
+                    str(bib_path),
+                    "--format",
+                    "json",
+                ]
+            )
+
+    assert exit_code == 0
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload[0]["status"] == "ambiguous"
+    assert payload[0]["input_key"] == "roughentry"
+    assert payload[0]["entry"]["citation_key"] == "candidate2024"
+
+
 def test_cli_resolve_updates_entry(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(

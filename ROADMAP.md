@@ -25,7 +25,21 @@ Completed:
 - lightweight BibTeX parsing;
 - SQLite storage for entries, creators, identifiers, and relations;
 - local text search using SQLite FTS5 when available;
+- standalone verification/disambiguation output for free-text references and partial BibTeX with auditable match metadata;
 - tests for ingest, relation storage, and search.
+
+## Comparison Notes From Related Repos
+
+The adjacent `TOA-Bib-Updater` and `VeriBib` repositories are useful prior art, but they contribute different things:
+
+- `VeriBib` contributes a good pre-ingest verification pattern: inspect ambiguous strings or partial BibTeX, rank candidates from legal metadata sources, and emit explicit audit fields instead of silently trusting a single match.
+- `TOA-Bib-Updater` contributes process discipline more than core data modeling: resumable long-running jobs, preserved source artifacts, and generated review outputs for manual inspection.
+
+`citegeist` should absorb those ideas where they improve the main local research workflow:
+
+1. keep verification and auditability in the core package, not just entry resolution after ingest;
+2. keep resumable manifests and review exports for large acquisition workflows, especially example pipelines and batch imports;
+3. avoid coupling the core model to brittle source-specific scraping logic.
 
 ## Phase 1: Core Ingestion And Export
 
@@ -67,7 +81,8 @@ Tasks:
 - support ingestion of OCR- or PDF-derived plaintext bibliography sections;
 - add normalization for author names, years, title casing, and page ranges;
 - prefer sentence-boundary venue detection over naive keyword splits so title text containing words like `report` is not truncated;
-- repair partially extracted venue stubs such as `Occas.` or `Proc.` by reparsing the full raw reference line when the structured fields are obviously incomplete;
+- repair partially extracted venue stubs such as `Occas.` or `Proc.` by reparsing the full raw reference line when the structured fields are obviously
+ incomplete;
 - preserve improved local draft parses even when remote enrichment remains unresolved, so later parser fixes can refresh stored BibTeX without requiring a successful metadata match;
 - build gold-test fixtures from real, messy reference examples.
 
@@ -122,7 +137,6 @@ Tasks:
 - expose unresolved nodes so the user can decide what to enrich next.
 
 Why this matters:
-
 - this is central to literature discovery rather than mere bibliography cleanup;
 - it turns the database into a research navigation tool.
 
@@ -164,7 +178,6 @@ Goal:
 Broaden source acquisition without mixing that complexity into the core model.
 
 Tasks:
-
 - add source adapters for open-access theses and dissertation repositories;
 - add support for harvesting publisher citation pages and preprint metadata pages;
 - define per-source import provenance and rate-limit behavior;

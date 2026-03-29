@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 .cache/
 *.pyc
+*.egg-info/
 library.sqlite3
