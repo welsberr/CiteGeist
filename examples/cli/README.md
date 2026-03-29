@@ -179,6 +179,12 @@ Write extracted BibTeX to a file:
 .venv/bin/python -m citegeist extract references.txt --output extracted-artificial-life.bib
 ```
 
+Extraction notes from messy legacy corpora:
+
+- use the full raw reference line as the repair source when the first parse leaves a truncated venue stub;
+- split title from publication data at likely sentence boundaries before falling back to keyword markers, so titles containing words like `report` are not cut early;
+- keep refreshed local BibTeX for unresolved entries so parser improvements can propagate even when no remote metadata source yields a match.
+
 ### Resolve
 
 Resolve one or more entries against remote metadata:
@@ -707,3 +713,4 @@ Apply curated corrections:
 - Some commands depend on live source access.
 - For topic-oriented examples, use preview mode before committing changes when possible.
 - The older TalkOrigins alias commands remain available, but the example-prefixed names are the preferred surface.
+- For extraction work on OCR-heavy or legacy references, keep regression fixtures for abbreviation-heavy venues such as `Proc.`, `Occas. Pap.`, and `Comm. Rept.` because those are easy places for title/venue splits to go wrong.

@@ -66,6 +66,9 @@ Tasks:
 - define a draft-entry schema for incomplete references with confidence markers;
 - support ingestion of OCR- or PDF-derived plaintext bibliography sections;
 - add normalization for author names, years, title casing, and page ranges;
+- prefer sentence-boundary venue detection over naive keyword splits so title text containing words like `report` is not truncated;
+- repair partially extracted venue stubs such as `Occas.` or `Proc.` by reparsing the full raw reference line when the structured fields are obviously incomplete;
+- preserve improved local draft parses even when remote enrichment remains unresolved, so later parser fixes can refresh stored BibTeX without requiring a successful metadata match;
 - build gold-test fixtures from real, messy reference examples.
 
 Why this is next:
@@ -76,7 +79,7 @@ Why this is next:
 Exit criteria:
 
 - a user can pass a plaintext bibliography section and receive draft BibTeX entries with unresolved fields clearly marked;
-- tests cover common article, book, chapter, and proceedings references.
+- tests cover common article, book, chapter, proceedings, report, and abbreviation-heavy legacy references.
 
 ## Phase 3: Metadata Enrichment
 
