@@ -1,0 +1,5 @@
+[1] Smith, Jane. 2024a. Graph-first bibliography augmentation. Journal of Research Systems 12(3): 45-67. doi:10.1000/example-doi.
+[2] Miller, Sam. 2023. Semantic search for research corpora. Proceedings of the Retrieval Workshop.
+[3] Doe, Alex. 2019. Evolutionary archives. PhD dissertation, Example University.
+[4] Chen, Bo. 2018. Field methods update. Technical Report No. TR-2018-05, Example Research Lab.
+[5] Nguyen, An. 2022. Project page. Retrieved from https://example.org/project-page.

@@ -23,6 +23,37 @@ def test_openalex_work_to_entry_maps_basic_fields():
     assert entry.fields["abstract"] == "Graph discovery"
 
 
+def test_openalex_work_to_entry_uses_journal_metadata_for_non_article_work_type():
+    entry = _openalex_work_to_entry(
+        {
+            "id": "https://openalex.org/W12345",
+            "doi": "https://doi.org/10.1000/example-openalex",
+            "display_name": "OpenAlex Journal-hosted Work",
+            "publication_year": 2022,
+            "type": "reference-entry",
+            "authorships": [{"author": {"display_name": "Jane Smith"}}],
+            "primary_location": {"source": {"display_name": "Journal of Graph Discovery", "type": "journal"}},
+        }
+    )
+
+    assert entry.entry_type == "article"
+    assert entry.fields["journal"] == "Journal of Graph Discovery"
+    assert "booktitle" not in entry.fields
+
+
+def test_openalex_work_to_entry_preserves_spacing_when_stripping_markup():
+    entry = _openalex_work_to_entry(
+        {
+            "id": "https://openalex.org/W12345",
+            "display_name": "The Oral Papilla of the Lancelet Larva (<i>Branchiostoma lanceolatum</i>)",
+            "publication_year": 2022,
+            "type": "article",
+        }
+    )
+
+    assert entry.fields["title"] == "The Oral Papilla of the Lancelet Larva (Branchiostoma lanceolatum)"
+
+
 def test_openalex_expander_adds_outgoing_and_incoming_edges():
     store = BibliographyStore()
     try:

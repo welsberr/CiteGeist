@@ -157,8 +157,7 @@ def test_bootstrap_ranks_and_deduplicates_topic_candidates():
         results = bootstrapper.bootstrap(store, topic="graph topic", expand=False, topic_limit=5)
 
         topic_results = [item for item in results if item.origin == "topic"]
-        assert [item.citation_key for item in topic_results] == ["shared2024graph", "crossref2024other"]
-        assert topic_results[0].score > topic_results[1].score
+        assert [item.citation_key for item in topic_results] == ["shared2024graph"]
     finally:
         store.close()
 
@@ -210,6 +209,92 @@ def test_bootstrap_topic_commit_limit_restricts_persisted_candidates():
         assert [item.citation_key for item in results if item.origin == "topic"] == ["rank1"]
         assert store.get_entry("rank1") is not None
         assert store.get_entry("rank2") is None
+    finally:
+        store.close()
+
+
+def test_bootstrap_topic_candidates_are_attached_to_topic():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(
+                entry_type="article",
+                citation_key="topic2024graph",
+                fields={"title": "Graph Topic Result", "year": "2024"},
+            )
+        ]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        bootstrapper.bootstrap(
+            store,
+            topic="graph topic",
+            topic_slug="graph-topic",
+            topic_name="Graph Topic",
+            topic_phrase="graph topic methods",
+            expand=False,
+            topic_commit_limit=1,
+        )
+
+        topic = store.get_topic("graph-topic")
+        assert topic is not None
+        assert topic["entry_count"] == 1
+        topic_entries = store.list_topic_entries("graph-topic")
+        assert [item["citation_key"] for item in topic_entries] == ["topic2024graph"]
+        assert topic_entries[0]["source_label"] == "topic:graph topic"
+        assert topic_entries[0]["confidence"] > 0
+    finally:
+        store.close()
+
+
+def test_bootstrap_topic_commit_requires_title_anchor():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
+            BibEntry(
+                entry_type="article",
+                citation_key="broad2024",
+                fields={
+                    "title": "The phylum Vertebrata: a case for zoological recognition",
+                    "abstract": "Chordata includes Cephalochordata and Urochordata.",
+                    "year": "2024",
+                },
+            ),
+            BibEntry(
+                entry_type="article",
+                citation_key="anchored2024",
+                fields={
+                    "title": "Acraniates and amphioxus in comparative development",
+                    "year": "2024",
+                },
+            ),
+        ]
+        bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, _key, relation_type="cites", limit=5: []  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(
+            store,
+            topic="acraniates cephalochordata amphioxus lancelet",
+            topic_slug="acraniates",
+            topic_name="Acraniates",
+            expand=False,
+            topic_commit_limit=5,
+        )
+
+        assert [item.citation_key for item in results] == ["anchored2024"]
+        topic_entries = store.list_topic_entries("acraniates")
+        assert [item["citation_key"] for item in topic_entries] == ["anchored2024"]
+        assert store.get_entry("broad2024") is None
     finally:
         store.close()
 

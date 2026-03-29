@@ -320,12 +320,12 @@ def _merged_entry_type(base_entry_type: str, resolved_entry_type: str) -> str:
 def _crossref_message_to_entry(message: dict) -> BibEntry:
     entry_type = _crossref_type_to_bibtype(message.get("type", "article"))
     title_values = message.get("title", [])
-    title = title_values[0] if title_values else ""
+    title = _normalize_text(title_values[0] if title_values else "")
     year = _extract_crossref_year(message)
     authors = " and ".join(_crossref_person_to_name(person) for person in message.get("author", []))
     venue = ""
     if container_title := message.get("container-title", []):
-        venue = container_title[0]
+        venue = _normalize_text(container_title[0])
 
     fields: dict[str, str] = {}
     if authors:
@@ -339,7 +339,9 @@ def _crossref_message_to_entry(message: dict) -> BibEntry:
     if url := message.get("URL"):
         fields["url"] = url
     if abstract := message.get("abstract"):
-        fields["abstract"] = abstract
+        normalized_abstract = _normalize_abstract_text(str(abstract))
+        if normalized_abstract:
+            fields["abstract"] = normalized_abstract
     if venue:
         if entry_type == "article":
             fields["journal"] = venue
@@ -439,7 +441,9 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
     doi = _normalize_openalex_doi(work.get("doi"))
     openalex_id = _normalize_openalex_id(work.get("id", ""))
     authors = " and ".join(_openalex_author_name(item) for item in work.get("authorships", []))
-    source = ((work.get("primary_location") or {}).get("source") or {}).get("display_name", "")
+    source_info = (work.get("primary_location") or {}).get("source") or {}
+    source = source_info.get("display_name", "")
+    source_type = _normalize_text(str(source_info.get("type") or "")).casefold()
     work_type = work.get("type", "")
 
     fields: dict[str, str] = {}
@@ -460,13 +464,13 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
         if abstract_text:
             fields["abstract"] = abstract_text
     if source:
-        if work_type == "article":
+        if _openalex_should_use_journal_field(work_type, source_type):
             fields["journal"] = source
         else:
             fields["booktitle"] = source
 
     citation_key = _openalex_citation_key(doi, openalex_id, authors, year, title)
-    return BibEntry(entry_type=_openalex_type_to_bibtype(work_type), citation_key=citation_key, fields=fields)
+    return BibEntry(entry_type=_openalex_type_to_bibtype(work_type, source_type), citation_key=citation_key, fields=fields)
 
 
 def _openalex_author_name(authorship: dict) -> str:
@@ -483,7 +487,13 @@ def _openalex_abstract_text(inverted_index: dict) -> str:
     return "" if _looks_like_openalex_page_blob(text) else text
 
 
-def _openalex_type_to_bibtype(work_type: str) -> str:
+def _openalex_should_use_journal_field(work_type: str, source_type: str) -> bool:
+    if work_type == "article":
+        return True
+    return source_type == "journal"
+
+
+def _openalex_type_to_bibtype(work_type: str, source_type: str = "") -> str:
     mapping = {
         "article": "article",
         "book": "book",
@@ -491,7 +501,13 @@ def _openalex_type_to_bibtype(work_type: str) -> str:
         "dissertation": "phdthesis",
         "proceedings-article": "inproceedings",
     }
-    return mapping.get(work_type, "misc")
+    if work_type in mapping:
+        return mapping[work_type]
+    if source_type == "journal":
+        return "article"
+    if source_type == "conference":
+        return "inproceedings"
+    return "misc"
 
 
 def _normalize_openalex_id(value: str) -> str:
@@ -509,8 +525,17 @@ def _normalize_openalex_doi(value: str | None) -> str:
 
 
 def _normalize_text(value: str) -> str:
-    without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
-    return " ".join(without_tags.split())
+    without_tags = re.sub(r"<[^>]+>", " ", html.unescape(value))
+    normalized = " ".join(without_tags.split())
+    normalized = re.sub(r"([\(\[\{])\s+", r"\1", normalized)
+    normalized = re.sub(r"\s+([\)\]\},.;:!?])", r"\1", normalized)
+    return normalized
+
+
+def _normalize_abstract_text(value: str) -> str:
+    normalized = _normalize_text(value)
+    normalized = re.sub(r"^abstract\s*[:.\-]?\s*", "", normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 def _normalize_person_display_name(value: str) -> str:

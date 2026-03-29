@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from .bibtex import BibEntry, render_bibtex
+from .extract import _clean_title, _guess_entry_type, _make_citation_key, _split_title_and_venue
 from .resolve import MetadataResolver, merge_entries, merge_entries_with_conflicts
 from .sources import SourceClient
 from .storage import BibliographyStore
@@ -823,13 +824,15 @@ class TalkOriginsScraper:
         if not author_part or not remainder:
             return None
 
-        title, venue = _split_title_and_venue(remainder)
+        title, venue = _split_title_and_venue(remainder, prefer_colon=True)
         if not title:
             return None
 
         authors = _normalize_gsa_authors(author_part)
         citation_key = _make_citation_key(authors, year, title, ordinal)
         entry_type = _guess_entry_type(remainder)
+        if ", in " in venue.lower() and " eds." in venue.lower():
+            entry_type = "book"
         fields = {
             "author": authors,
             "year": year,
@@ -911,19 +914,6 @@ def _extract_author_prefix(entry_text: str) -> str:
     return entry_text[: year_match.start()].strip(" ,;:")
 
 
-def _split_title_and_venue(remainder: str) -> tuple[str, str]:
-    if ": " in remainder:
-        title, venue = remainder.split(": ", 1)
-        return _clean_fragment(title), _clean_fragment(venue)
-
-    parts = [part.strip() for part in remainder.split(". ") if part.strip()]
-    if not parts:
-        return "", ""
-    title = parts[0]
-    venue = ". ".join(parts[1:]) if len(parts) > 1 else ""
-    return _clean_fragment(title), _clean_fragment(venue)
-
-
 def _normalize_gsa_authors(author_part: str) -> str:
     cleaned = WHITESPACE_PATTERN.sub(" ", author_part.replace("&", " and ")).strip(" ,;:")
     if " and " in cleaned and "," not in cleaned:
@@ -950,43 +940,8 @@ def _normalize_gsa_authors(author_part: str) -> str:
     return " and ".join(authors) if authors else cleaned
 
 
-def _make_citation_key(authors: str, year: str, title: str, ordinal: int) -> str:
-    first_author = authors.split(" and ")[0]
-    family = first_author.split(",", 1)[0] if "," in first_author else first_author.split()[-1]
-    family = re.sub(r"[^A-Za-z0-9]+", "", family).lower() or "ref"
-    first_word = re.sub(r"[^A-Za-z0-9]+", "", title.split()[0]).lower() if title.split() else "untitled"
-    first_word = first_word or "untitled"
-    return f"{family}{year}{first_word}{ordinal}"
-
-
-def _guess_entry_type(text: str) -> str:
-    lowered = text.lower()
-    if "ph.d" in lowered or "dissertation" in lowered or "thesis" in lowered:
-        return "phdthesis"
-    if any(
-        token in lowered
-        for token in (
-            "press",
-            "publisher",
-            "publications",
-            "publication",
-            "elsevier",
-            "springer",
-            "wiley",
-            "university",
-            "books",
-        )
-    ):
-        return "book"
-    if any(token in lowered for token in ("proceedings", "conference", "symposium", "workshop")):
-        return "inproceedings"
-    if any(token in lowered for token in ("journal", "review", "letters", "quarterly", "science", "nature")):
-        return "article"
-    return "misc"
-
-
 def _clean_fragment(value: str) -> str:
-    return WHITESPACE_PATTERN.sub(" ", value.strip(" .;:,\"'"))
+    return _clean_title(WHITESPACE_PATTERN.sub(" ", value))
 
 
 def _slugify(value: str) -> str:

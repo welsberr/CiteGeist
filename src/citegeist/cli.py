@@ -12,7 +12,13 @@ from .bibtex import parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander
-from .extract import extract_references
+from .extract import (
+    available_extraction_backends,
+    check_extraction_comparison_summary,
+    compare_extraction_backends,
+    extract_references,
+    summarize_extraction_comparison,
+)
 from .harvest import OaiPmhHarvester
 from .resolve import MetadataResolver, merge_entries_with_conflicts
 from .storage import BibliographyStore
@@ -68,7 +74,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract_parser = subparsers.add_parser("extract", help="Extract draft BibTeX from plaintext references")
     extract_parser.add_argument("input", help="Plaintext file containing bibliography-style references")
+    extract_parser.add_argument(
+        "--backend",
+        choices=available_extraction_backends(),
+        default="heuristic",
+        help="Reference extraction backend to use",
+    )
     extract_parser.add_argument("--output", help="Write extracted BibTeX to a file instead of stdout")
+
+    compare_extract_parser = subparsers.add_parser(
+        "compare-extract",
+        help="Run multiple extraction backends on the same plaintext references and emit a JSON comparison",
+    )
+    compare_extract_parser.add_argument("input", help="Plaintext file containing bibliography-style references")
+    compare_extract_parser.add_argument(
+        "--backend",
+        action="append",
+        dest="backends",
+        choices=available_extraction_backends(),
+        help="Backend to include in the comparison; may be passed multiple times",
+    )
+    compare_extract_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Emit a compact JSON summary instead of row-by-row comparison output",
+    )
+    compare_extract_parser.add_argument(
+        "--max-rows-with-differences",
+        type=int,
+        help="Fail with a nonzero exit code if rows_with_differences exceeds this value",
+    )
+    compare_extract_parser.add_argument(
+        "--max-field-difference-count",
+        type=int,
+        help="Fail with a nonzero exit code if any field disagreement count exceeds this value",
+    )
+    compare_extract_parser.add_argument("--output", help="Write JSON comparison to a file instead of stdout")
 
     verify_parser = subparsers.add_parser(
         "verify",
@@ -553,7 +594,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "apply-conflict":
             return _run_apply_conflict(store, args.citation_key, args.field_name)
         if args.command == "extract":
-            return _run_extract(Path(args.input), args.output)
+            return _run_extract(Path(args.input), args.backend, args.output)
+        if args.command == "compare-extract":
+            return _run_compare_extract(
+                Path(args.input),
+                args.backends,
+                args.summary,
+                args.max_rows_with_differences,
+                args.max_field_difference_count,
+                args.output,
+            )
         if args.command == "verify":
             return _run_verify(args.string, args.list_input, args.bib, args.context, args.limit, args.format, args.output)
         if args.command == "resolve":
@@ -792,9 +842,9 @@ def _run_apply_conflict(store: BibliographyStore, citation_key: str, field_name:
     return 0
 
 
-def _run_extract(input_path: Path, output: str | None) -> int:
+def _run_extract(input_path: Path, backend: str, output: str | None) -> int:
     text = input_path.read_text(encoding="utf-8")
-    entries = extract_references(text)
+    entries = extract_references(text, backend=backend)
     rendered = render_bibtex(entries)
     if output:
         Path(output).write_text(rendered + ("\n" if rendered else ""), encoding="utf-8")
@@ -802,6 +852,43 @@ def _run_extract(input_path: Path, output: str | None) -> int:
         if rendered:
             print(rendered)
     return 0
+
+
+def _run_compare_extract(
+    input_path: Path,
+    backends: list[str] | None,
+    summary: bool,
+    max_rows_with_differences: int | None,
+    max_field_difference_count: int | None,
+    output: str | None,
+) -> int:
+    text = input_path.read_text(encoding="utf-8")
+    rows = compare_extraction_backends(text, backends=backends)
+    payload: object
+    exit_code = 0
+    if summary:
+        summary_payload = summarize_extraction_comparison(rows)
+        payload = summary_payload.to_dict()
+        if max_rows_with_differences is not None or max_field_difference_count is not None:
+            check = check_extraction_comparison_summary(
+                summary_payload,
+                max_rows_with_differences=max_rows_with_differences,
+                max_field_difference_count=max_field_difference_count,
+            )
+            payload = {
+                "summary": payload,
+                "check": check.to_dict(),
+            }
+            if not check.passed:
+                exit_code = 1
+    else:
+        payload = [row.to_dict() for row in rows]
+    rendered = json.dumps(payload, indent=2)
+    if output:
+        Path(output).write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
+    return exit_code
 
 
 def _run_verify(

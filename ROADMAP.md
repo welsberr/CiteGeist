@@ -25,8 +25,18 @@ Completed:
 - lightweight BibTeX parsing;
 - SQLite storage for entries, creators, identifiers, and relations;
 - local text search using SQLite FTS5 when available;
+- CLI workflows for ingest, inspect, search, export, conflict review, bootstrap, graph traversal, expansion, OAI discovery/harvest, extraction, verification, and extraction-backend comparison;
+- entry review-state tracking plus field-level provenance and conflict handling;
+- plaintext reference extraction with a staged heuristic parser that preserves identifiers, year suffixes, volume/issue/pages, and thesis/report/web-style hints;
+- optional extraction backends for AnyStyle and GROBID behind explicit backend selection, with shared normalization back into CiteGeist draft-entry conventions;
+- backend comparison, summary, and threshold-check workflows for parser regression/evaluation;
 - standalone verification/disambiguation output for free-text references and partial BibTeX with auditable match metadata;
+- identifier-first metadata resolution plus title-search fallback across DOI, OpenAlex, DBLP, arXiv, and DataCite-backed flows;
+- citation-graph expansion and topic-oriented bootstrap/expansion workflows;
+- OAI-PMH repository discovery and harvesting for external corpus acquisition;
 - tests for ingest, relation storage, and search.
+
+In effect, Phases 1 and 2 are largely in place, and substantial parts of Phases 3, 4, and 6 already exist in usable form. The roadmap is now less about creating the first end-to-end path and more about improving quality, evaluation, and larger-corpus review discipline.
 
 ## Comparison Notes From Related Repos
 
@@ -40,6 +50,15 @@ The adjacent `TOA-Bib-Updater` and `VeriBib` repositories are useful prior art, 
 1. keep verification and auditability in the core package, not just entry resolution after ingest;
 2. keep resumable manifests and review exports for large acquisition workflows, especially example pipelines and batch imports;
 3. avoid coupling the core model to brittle source-specific scraping logic.
+
+## Source Notes
+
+Reference-extraction planning in this repository currently draws on both external and internal prior art:
+
+- External conceptual sources: GROBID, AnyStyle, and ParsCit are the main references for staged citation parsing, token/field separation, and gold-fixture-driven improvement.
+- Internal code sources: the plaintext extractor should continue to reuse and consolidate heuristics already present in `citegeist.talkorigins` and `citegeist.expand` where those routines solve overlapping problems such as thesis/report classification, fragment cleanup, or citation-blob handling.
+
+This project should acknowledge those influences in code comments and docs when parser behavior is intentionally adapted from them.
 
 ## Phase 1: Core Ingestion And Export
 
@@ -67,6 +86,9 @@ Exit criteria:
 - a user can ingest a `.bib` file, inspect entries, search locally, and export a reviewed `.bib`;
 - round-trip tests show no unexpected field loss for supported entry types.
 
+Status:
+Largely complete. Remaining work here is mostly refinement: export fidelity on edge cases, review ergonomics, and better audit/report surfaces rather than missing core capability.
+
 ## Phase 2: Reference Extraction
 
 Priority: P0
@@ -80,6 +102,10 @@ Tasks:
 - define a draft-entry schema for incomplete references with confidence markers;
 - support ingestion of OCR- or PDF-derived plaintext bibliography sections;
 - add normalization for author names, years, title casing, and page ranges;
+- keep the parser staged internally so segmentation, field parsing, and later optional external backends remain separable;
+- keep the local heuristic parser as the default path even if optional external backends are added later;
+- support optional external parser adapters only behind explicit backend selection, so local workflows still work without Ruby/Java services;
+- when adding external backends, normalize their outputs back into the same draft-entry conventions used by the local parser;
 - prefer sentence-boundary venue detection over naive keyword splits so title text containing words like `report` is not truncated;
 - repair partially extracted venue stubs such as `Occas.` or `Proc.` by reparsing the full raw reference line when the structured fields are obviously
  incomplete;
@@ -95,6 +121,9 @@ Exit criteria:
 
 - a user can pass a plaintext bibliography section and receive draft BibTeX entries with unresolved fields clearly marked;
 - tests cover common article, book, chapter, proceedings, report, and abbreviation-heavy legacy references.
+
+Status:
+Substantially complete for the current heuristic-first strategy. The remaining work is quality-focused: larger curated fixtures, sharper benchmark discipline, and continued parser refinement rather than creating the extraction path from scratch.
 
 ## Phase 3: Metadata Enrichment
 
@@ -121,6 +150,9 @@ Exit criteria:
 - an incomplete entry can be enriched from at least one authoritative source;
 - conflicting fields remain visible for review instead of being lost.
 
+Status:
+Partially complete. Resolver and merge behavior are already useful, especially for identifier-first flows, but provenance-rich resolution logs, comparative resolver evaluation, and more deliberate review tooling still need attention.
+
 ## Phase 4: Citation Graph Expansion
 
 Priority: P1
@@ -144,6 +176,9 @@ Exit criteria:
 
 - starting from one or more seed entries, a user can expand outward through citation edges and persist newly discovered nodes;
 - graph traversal results can be exported as BibTeX candidates for review.
+
+Status:
+Partially complete and already usable. The main next-step work is better scoring, filtering, and review surfaces for large discovery sets rather than basic graph traversal.
 
 ## Phase 5: Search And Ranking
 
@@ -170,6 +205,17 @@ Exit criteria:
 - local search is useful on realistic corpora without requiring external services;
 - semantic indexing is optional and does not displace the simpler local search path.
 
+Status:
+Early but serviceable. SQLite FTS covers the basic local-search path, but retrieval benchmarking, saved search workflows, and optional semantic ranking remain future work.
+
+Note:
+The repository now has a small app-facing JSON adapter surface, a lightweight local HTTP bridge, and a static literature-explorer demo shell. That is enough for a browser or desktop-web shell to drive topic discovery, topic expansion, extraction, verification, entry inspection, and lightweight graph exploration against one local database. It is still a demo boundary rather than a full multi-user application or long-running service architecture.
+
+Near-term follow-up for this demo surface:
+- add stronger candidate-review interactions for bootstrap and expansion results;
+- improve graph review beyond the current lightweight SVG overview;
+- keep payload contracts stable enough that the demo can double as an evaluation harness for parser and discovery changes.
+
 ## Phase 6: Corpus Acquisition Pipelines
 
 Priority: P2
@@ -194,10 +240,13 @@ Exit criteria:
 - new public corpora can be imported through adapters without changing the storage core;
 - imported entries retain their source provenance and can be reviewed like any other entry.
 
+Status:
+Partially complete. OAI acquisition and the TalkOrigins example already demonstrate the pattern, but the general adapter surface and review/report discipline across more sources still need expansion.
+
 ## Suggested Next Three Tasks
 
-1. Add a CLI module with `ingest`, `search`, `show`, and `export`.
-2. Implement BibTeX export from the normalized store.
-3. Add provenance tables and entry review status fields.
+1. Expand evaluation fixtures and benchmarking for extraction and verification so backend disagreement, parser regressions, and resolver quality can be measured on a broader real-world corpus.
+2. Strengthen review and audit workflows for enrichment/graph expansion, especially around provenance logs, candidate summaries, and larger batch-review artifacts.
+3. Improve discovery quality inside topic and corpus workflows through better ranking/filtering, more deliberate topic assignment criteria, and retrieval benchmarks that compare lexical and future semantic approaches.
 
-These three tasks complete the first usable local workflow and should be treated as the immediate sprint.
+These three tasks should be treated as the immediate sprint because the basic workflow now exists; the bottleneck has shifted to quality measurement, reviewability, and discovery precision.

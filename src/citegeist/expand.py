@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
 from .bibtex import BibEntry, parse_bibtex
+from .extract import _extract_thesis_like_title, _looks_like_citation_blob as _shared_looks_like_citation_blob
 from .resolve import MetadataResolver, merge_entries
 from .storage import BibliographyStore
 
@@ -455,25 +456,8 @@ def _extract_crossref_unstructured_title(text: str) -> str:
     normalized = _normalize_text(text)
     if not normalized:
         return ""
-
-    thesis_markers = (
-        "(Master",
-        "(Doctoral",
-        "PhD dissertation",
-        "Master's thesis",
-        "Master’s thesis",
-        "Doctoral dissertation",
-    )
-    for marker in thesis_markers:
-        if marker in normalized:
-            normalized = normalized.split(marker, 1)[0].strip(" .")
-            break
-    for marker in (" ProQuest", " UMI No.", " Dissertation Abstracts", " University Microfilms"):
-        if marker in normalized:
-            normalized = normalized.split(marker, 1)[0].strip(" .")
-    if any(marker in text for marker in thesis_markers) and ". " in normalized:
-        normalized = normalized.split(". ", 1)[1].strip()
-    return normalized.strip(" .")
+    thesis_title = _extract_thesis_like_title(normalized)
+    return thesis_title or normalized.strip(" .")
 
 
 def _skip_crossref_reference(reference: dict, entry: BibEntry) -> bool:
@@ -500,18 +484,7 @@ def _skip_crossref_reference(reference: dict, entry: BibEntry) -> bool:
 
 
 def _looks_like_citation_blob(text: str) -> bool:
-    lowered = text.casefold()
-    if any(token in lowered for token in ("http://", "https://", "www.", " accessed ", " url ")):
-        return True
-    if any(token in lowered for token in ("supporting material", "grant", "poll results", "prescribing information")):
-        return True
-    if text.count(",") >= 3 or text.count(";") >= 2:
-        return True
-    if re.search(r"\(\d{4}\)", text):
-        return True
-    if re.search(r"\b[A-Z]\.[ ]?[A-Z]?\.", text):
-        return True
-    return False
+    return _shared_looks_like_citation_blob(text)
 
 
 def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int) -> str:
@@ -527,8 +500,11 @@ def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int
 
 
 def _normalize_text(value: str) -> str:
-    without_tags = re.sub(r"<[^>]+>", "", html.unescape(value))
-    return " ".join(without_tags.split())
+    without_tags = re.sub(r"<[^>]+>", " ", html.unescape(value))
+    normalized = " ".join(without_tags.split())
+    normalized = re.sub(r"([\(\[\{])\s+", r"\1", normalized)
+    normalized = re.sub(r"\s+([\)\]\},.;:!?])", r"\1", normalized)
+    return normalized
 
 
 def _normalize_person_display_name(value: str) -> str:
@@ -699,7 +675,9 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
     doi = _normalize_openalex_doi(work.get("doi"))
     openalex_id = _normalize_openalex_id(work.get("id", ""))
     authors = " and ".join(_openalex_author_name(item) for item in work.get("authorships", []))
-    source = ((work.get("primary_location") or {}).get("source") or {}).get("display_name", "")
+    source_info = (work.get("primary_location") or {}).get("source") or {}
+    source = source_info.get("display_name", "")
+    source_type = _normalize_text(str(source_info.get("type") or "")).casefold()
     work_type = work.get("type", "")
 
     fields: dict[str, str] = {"title": title}
@@ -717,13 +695,13 @@ def _openalex_work_to_entry(work: dict) -> BibEntry:
         if abstract_text:
             fields["abstract"] = abstract_text
     if source:
-        if work_type == "article":
+        if _openalex_should_use_journal_field(work_type, source_type):
             fields["journal"] = source
         else:
             fields["booktitle"] = source
 
     citation_key = _openalex_citation_key(doi, openalex_id, authors, year, title)
-    entry_type = _openalex_type_to_bibtype(work_type)
+    entry_type = _openalex_type_to_bibtype(work_type, source_type)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
 
 
@@ -742,7 +720,13 @@ def _openalex_abstract_text(inverted_index: dict) -> str:
     return "" if _looks_like_openalex_page_blob(text) else text
 
 
-def _openalex_type_to_bibtype(work_type: str) -> str:
+def _openalex_should_use_journal_field(work_type: str, source_type: str) -> bool:
+    if work_type == "article":
+        return True
+    return source_type == "journal"
+
+
+def _openalex_type_to_bibtype(work_type: str, source_type: str = "") -> str:
     mapping = {
         "article": "article",
         "book": "book",
@@ -750,7 +734,13 @@ def _openalex_type_to_bibtype(work_type: str) -> str:
         "dissertation": "phdthesis",
         "proceedings-article": "inproceedings",
     }
-    return mapping.get(work_type, "misc")
+    if work_type in mapping:
+        return mapping[work_type]
+    if source_type == "journal":
+        return "article"
+    if source_type == "conference":
+        return "inproceedings"
+    return "misc"
 
 
 def _openalex_citation_key(doi: str, openalex_id: str, authors: str, year: str, title: str) -> str:

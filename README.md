@@ -48,6 +48,8 @@ The initial repo includes:
 - a small CLI for ingest, search, inspection, and export;
 - review-state tracking on entries, per-field ingest provenance, and field-level conflict review;
 - plaintext reference extraction into draft BibTeX for numbered, APA-like, wrapped-line, and simple book-style references;
+- staged plaintext reference extraction that now preserves more structured metadata from legacy references, including year suffixes, identifiers, volume/issue/pages, and thesis/report/web-style venue hints;
+- a reference-extraction backend seam with the local `heuristic` parser as the default implementation, so optional external backends can be added later without changing the core extract workflow;
 - standalone verification and disambiguation of free-text references or partial BibTeX into auditable BibTeX/JSON results with `x_status`, `x_confidence`, `x_source`, `x_query`, and alternate-candidate traces;
 - identifier-first metadata resolution for DOI, OpenAlex, DBLP, arXiv, and DataCite-backed entries, with OpenAlex/DataCite title-search fallback;
 - local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
@@ -65,9 +67,41 @@ Example applications live alongside the core package rather than defining it. Cu
 
 - a comprehensive CLI cookbook in [examples/cli/README.md](./examples/cli/README.md);
 - a topic-only bootstrap workflow for `artificial life` in [examples/artificial-life/README.md](./examples/artificial-life/README.md);
+- a browser-oriented literature explorer demo with a small HTTP bridge, static HTML/JS shell, and lightweight graph view in [examples/literature-explorer/README.md](./examples/literature-explorer/README.md);
 - the TalkOrigins bibliography pipeline under [`citegeist.examples.talkorigins`](./src/citegeist/examples/talkorigins.py) with a usage guide in [examples/talkorigins/README.md](./examples/talkorigins/README.md).
 
 The prioritized execution plan lives in [ROADMAP.md](./ROADMAP.md).
+
+## Status Assessment
+
+`citegeist` is no longer just a storage-and-export skeleton. It now covers the main early pipeline the project set out to make usable on one local machine:
+
+1. ingest or extract rough references,
+2. verify and improve them before trust is assumed,
+3. normalize and store them with provenance,
+4. expand outward through citation links,
+5. review and export BibTeX again.
+
+In practical terms, the strongest implemented areas are now:
+
+- BibTeX-native local storage, review state, provenance tracking, and export;
+- rough-reference handling through both heuristic extraction and standalone verification/disambiguation;
+- conservative metadata enrichment and citation-graph expansion from scholarly APIs;
+- fixture-backed parser and source-client workflows that keep improvement work auditable;
+- a lightweight local demo surface for topic discovery, topic expansion, extraction, verification, and graph inspection in the browser without introducing a full web framework dependency.
+
+The main gaps are no longer the basic pipeline. The main gaps are evaluation depth and researcher ergonomics: broader regression fixtures, clearer comparative quality measurement across parsers/resolvers, stronger review workflows for larger corpora, and a richer review UI than the current demonstration shell.
+
+## Positioning
+
+Compared with other bibliographic tooling, `citegeist` is strongest when bibliography work starts messy and needs to become structured:
+
+- Against reference managers such as Zotero or JabRef, `citegeist` is currently weaker as a polished day-to-day library manager or sync-oriented desktop app, but stronger as a BibTeX-first command-line workbench for extraction, repair, provenance, and graph-oriented discovery.
+- Against parser-focused tools such as AnyStyle, GROBID, or ParsCit-style systems, `citegeist` is not trying to outcompete them as a dedicated citation parser. Instead, it now uses their staged-parsing ideas and can optionally call external parsers while keeping a local default parser and a normalized BibTeX-oriented downstream workflow.
+- Against verifier/disambiguator workflows like `VeriBib`, `citegeist` now covers the same high-value pre-ingest verification pattern, but places it inside a broader local pipeline that also stores results, resolves identifiers, expands citation graphs, and exports reviewed BibTeX.
+- Against process-heavy corpus updaters like `TOA-Bib-Updater`, `citegeist` now adopts the useful operational pattern of staged artifacts and reviewable outputs, but keeps the core centered on reusable library/database primitives rather than one source-specific acquisition script.
+
+The clearest differentiator at this point is integration. `citegeist` is becoming a local bibliography workbench that combines extraction, verification, enrichment, graph expansion, topic-aware review, and BibTeX export in one toolchain rather than treating those as unrelated utilities.
 
 ## Layout
 
@@ -133,6 +167,10 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 apply-conflict
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --seed-bib seed.bib --topic "bayesian nonparametrics"
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 bootstrap --topic "bayesian nonparametrics" --preview --topic-commit-limit 5
 PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --output draft.bib
+PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --backend heuristic --output draft.bib
+PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --backend heuristic --backend anystyle --output compare.json
+PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --backend heuristic --backend grobid --summary --output compare-summary.json
+PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --backend heuristic --backend grobid --summary --max-rows-with-differences 0 --output compare-check.json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --string '"Graph-first bibliography augmentation" Smith 2024' --context "citation graphs" --format json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --bib draft.bib --output verified.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
@@ -176,6 +214,51 @@ For live-source development, prefer fixture-backed or cache-backed source client
 
 - From `VeriBib`: a standalone `verify` workflow for ambiguous strings or rough BibTeX, with explicit confidence/status audit fields and alternate-candidate traces before you commit changes to the main library.
 - From `TOA-Bib-Updater`: resumable, artifact-oriented corpus processing remains the preferred process model for large imports. In practice this already appears in the TalkOrigins example pipeline through saved manifests, review exports, duplicate reports, and staged topic-phrase review flows.
+
+Those ideas are now implemented enough to matter operationally, not just directionally: `VeriBib`'s main contribution has become a core `verify` command, while `TOA-Bib-Updater`'s main contribution remains process shape and review artifacts rather than parser or storage internals.
+
+## Parsing Sources
+
+The plaintext-reference parser is still local and heuristic-first, but its current direction explicitly borrows ideas from earlier citation-parsing work:
+
+- Conceptual influence: GROBID's staged parsing model and bibliographical-reference annotation guidance informed the split between reference-block segmentation, field extraction, and metadata recovery, especially for identifiers, year variants, and venue/page structure.
+- Conceptual influence: AnyStyle and ParsCit informed the emphasis on treating reference parsing as a separable stage with gold-fixture-driven improvement rather than a one-pass punctuation split.
+- In-repo code prior art: some of the newer heuristics were adapted from existing CiteGeist code in [`src/citegeist/talkorigins.py`](./src/citegeist/talkorigins.py) and [`src/citegeist/expand.py`](./src/citegeist/expand.py), particularly around entry-type guessing, fragment cleanup, and thesis/report handling for citation-like blobs.
+
+External references used for the current parser direction:
+
+- GROBID principles and parsing architecture: <https://grobid.readthedocs.io/en/latest/Principles/>
+- GROBID bibliographical-reference annotation notes: <https://grobid.readthedocs.io/en/latest/training/Bibliographical-references/>
+- AnyStyle project: <https://github.com/inukshuk/anystyle>
+- ParsCit paper: <https://aclanthology.org/L08-1291/>
+
+The built-in extraction backends are:
+
+- `heuristic`: the default local parser, always available
+- `anystyle`: an optional adapter around the AnyStyle CLI when `anystyle` is installed locally
+- `grobid`: an optional adapter around a running GROBID service using `/api/processCitationList`
+
+The backend interface exists so future GROBID- or other parser adapters can be registered without replacing the local parser or changing the CLI contract.
+
+To compare backend output on the same plaintext references, use `compare-extract`. It aligns entries by ordinal/reference block and emits JSON with per-backend payloads plus a `differing_fields` summary for each row. Add `--summary` when you want a compact evaluation artifact with disagreement counts by field and backend presence counts instead of the full row-by-row payload. Add `--max-rows-with-differences` and/or `--max-field-difference-count` when you want CI-style failure thresholds; the command will emit the summary JSON and return a nonzero exit code if the limits are exceeded.
+
+For regression-oriented parser work, keep a small curated plaintext fixture set and run `compare-extract` against multiple backends before changing heuristics. That makes backend disagreement explicit and gives you a stable review artifact for parser changes.
+
+For the optional AnyStyle backend, install the CLI separately and then run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --backend anystyle --output draft.bib
+```
+
+If the binary is not on `PATH`, set `CITEGEIST_ANYSTYLE_BIN=/path/to/anystyle`. If you want a custom AnyStyle parser model, set `CITEGEIST_ANYSTYLE_PARSER_MODEL=/path/to/model.mod`.
+
+For the optional GROBID backend, start a GROBID service and then run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist extract references.txt --backend grobid --output draft.bib
+```
+
+By default CiteGeist targets `http://127.0.0.1:8070`. Override that with `CITEGEIST_GROBID_URL=http://host:port` if your service is elsewhere.
 
 ## Example Application
 

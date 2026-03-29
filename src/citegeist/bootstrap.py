@@ -48,6 +48,8 @@ class Bootstrapper:
     ) -> list[BootstrapResult]:
         results: list[BootstrapResult] = []
         seed_keys: list[str] = []
+        effective_topic_slug = topic_slug or (_slugify(topic) if topic else None)
+        effective_topic_name = topic_name or topic
 
         if seed_bibtex:
             for entry in parse_bibtex(seed_bibtex):
@@ -61,6 +63,16 @@ class Bootstrapper:
                         review_status=review_status,
                     )
                     seed_keys.append(entry.citation_key)
+                    if effective_topic_slug and effective_topic_name:
+                        store.add_entry_topic(
+                            entry.citation_key,
+                            topic_slug=effective_topic_slug,
+                            topic_name=effective_topic_name,
+                            source_type="bootstrap",
+                            source_label="seed_bibtex",
+                            confidence=1.0,
+                            expansion_phrase=topic_phrase or topic,
+                        )
                 results.append(
                     BootstrapResult(
                         entry.citation_key,
@@ -76,13 +88,19 @@ class Bootstrapper:
         if topic:
             if not preview_only and (topic_slug or topic_name or topic_phrase):
                 store.ensure_topic(
-                    slug=topic_slug or _slugify(topic),
-                    name=topic_name or topic,
+                    slug=effective_topic_slug or _slugify(topic),
+                    name=effective_topic_name or topic,
                     source_type="bootstrap",
                     expansion_phrase=topic_phrase or topic,
                 )
             candidate_limit = max(topic_limit, topic_commit_limit or 0)
             ranked_candidates = self._topic_candidates(topic, seed_keys, candidate_limit)
+            if not preview_only:
+                ranked_candidates = [
+                    (entry, score)
+                    for entry, score in ranked_candidates
+                    if _meets_topic_commit_threshold(entry, topic)
+                ]
             if topic_commit_limit is not None:
                 ranked_candidates = ranked_candidates[:topic_commit_limit]
 
@@ -97,6 +115,16 @@ class Bootstrapper:
                         review_status=review_status,
                     )
                     seed_keys.append(entry.citation_key)
+                    if effective_topic_slug and effective_topic_name:
+                        store.add_entry_topic(
+                            entry.citation_key,
+                            topic_slug=effective_topic_slug,
+                            topic_name=effective_topic_name,
+                            source_type="bootstrap",
+                            source_label=f"topic:{topic}",
+                            confidence=score,
+                            expansion_phrase=topic_phrase or topic,
+                        )
                 results.append(
                     BootstrapResult(
                         entry.citation_key,
@@ -164,6 +192,30 @@ def _seed_overlap_score(entry: BibEntry, seed_keys: list[str]) -> float:
 
 def _tokenize(value: str) -> set[str]:
     return {token for token in re.split(r"\W+", value.lower()) if token}
+
+
+def _core_topic_terms(value: str) -> set[str]:
+    generic_terms = {"evolution", "origin", "origins", "science", "study", "studies"}
+    return {token for token in _tokenize(value) if token not in generic_terms}
+
+
+def _meets_topic_commit_threshold(entry: BibEntry, topic: str) -> bool:
+    title = entry.fields.get("title", "")
+    if not title:
+        return False
+    normalized_topic = " ".join(topic.casefold().split())
+    normalized_title = " ".join(title.casefold().split())
+    if normalized_topic and normalized_topic in normalized_title:
+        return True
+
+    topic_terms = _core_topic_terms(topic)
+    if not topic_terms:
+        return False
+    title_terms = _tokenize(title)
+    overlap = topic_terms & title_terms
+    if not overlap:
+        return False
+    return max(0.25, len(overlap) / len(topic_terms)) >= 0.2
 
 
 def _slugify(value: str) -> str:

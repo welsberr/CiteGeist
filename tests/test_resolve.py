@@ -48,6 +48,28 @@ def test_crossref_message_to_entry_handles_missing_author_without_crashing():
     assert entry.fields["year"] == "2003"
 
 
+def test_crossref_message_to_entry_strips_markup_from_title_and_abstract():
+    entry = _crossref_message_to_entry(
+        {
+            "type": "journal-article",
+            "title": [
+                "The Fine Structure of the Testis of a Lancelet (=Amphioxus), <i>Branchiostoma floridae</i>"
+            ],
+            "container-title": ["Acta <i>Zoologica</i>"],
+            "abstract": "<jats:title>Abstract</jats:title><jats:p>Tagged abstract text.</jats:p>",
+            "author": [{"family": "Holland", "given": "Nicholas D."}],
+            "issued": {"date-parts": [[1989]]},
+        }
+    )
+
+    assert entry.fields["title"] == (
+        "The Fine Structure of the Testis of a Lancelet (=Amphioxus), Branchiostoma floridae"
+    )
+    assert entry.fields["journal"] == "Acta Zoologica"
+    assert entry.fields["abstract"] == "Tagged abstract text."
+    assert "), Branchiostoma" in entry.fields["title"]
+
+
 def test_arxiv_atom_entry_to_bib_maps_basic_fields():
     xml = ET.fromstring(
         """
@@ -206,6 +228,23 @@ def test_openalex_work_to_entry_maps_basic_fields():
     assert entry.fields["doi"] == "10.1000/example-openalex"
     assert entry.fields["journal"] == "Journal of Open Graphs"
     assert entry.fields["abstract"] == "OpenAlex resolved"
+
+
+def test_openalex_work_to_entry_uses_journal_metadata_for_non_article_work_type():
+    entry = _openalex_work_to_entry(
+        {
+            "id": "https://openalex.org/W12345",
+            "display_name": "OpenAlex Resolved Work",
+            "publication_year": 2022,
+            "type": "reference-entry",
+            "authorships": [{"author": {"display_name": "Jane Smith"}}],
+            "primary_location": {"source": {"display_name": "Journal of Open Graphs", "type": "journal"}},
+        }
+    )
+
+    assert entry.entry_type == "article"
+    assert entry.fields["journal"] == "Journal of Open Graphs"
+    assert "booktitle" not in entry.fields
 
 
 def test_openalex_work_to_entry_normalizes_reversed_initial_author_name():

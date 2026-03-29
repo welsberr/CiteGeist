@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CiteGeist Literature Explorer</title>
+  <style>
+    :root {
+      --bg: #f2efe7;
+      --paper: rgba(255, 252, 247, 0.92);
+      --ink: #1f1c18;
+      --muted: #6d655b;
+      --line: rgba(60, 46, 28, 0.16);
+      --accent: #8d3f2d;
+      --accent-2: #2f5f5a;
+      --accent-3: #9f7a18;
+      --danger: #8b2720;
+      --shadow: 0 18px 40px rgba(38, 27, 15, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(219, 184, 132, 0.20), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(96, 130, 123, 0.16), transparent 24%),
+        linear-gradient(180deg, #f8f3eb 0%, #efe9de 100%);
+    }
+
+    .shell {
+      width: min(1420px, calc(100vw - 2rem));
+      margin: 1rem auto 2rem;
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 1rem;
+    }
+
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .sidebar {
+      padding: 1.1rem;
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+    }
+
+    .content {
+      padding: 1rem;
+      display: grid;
+      gap: 1rem;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: "IBM Plex Serif", "Georgia", serif;
+      line-height: 1.05;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.4rem;
+    }
+
+    h2 {
+      font-size: 1.15rem;
+      margin-bottom: 0.75rem;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .lede {
+      margin-bottom: 1rem;
+      font-size: 0.98rem;
+    }
+
+    .stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .card {
+      padding: 1rem;
+    }
+
+    .row {
+      display: grid;
+      gap: 0.65rem;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .row-3 {
+      display: grid;
+      gap: 0.65rem;
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    label {
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    input, textarea, select, button {
+      font: inherit;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid rgba(73, 57, 35, 0.18);
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--ink);
+      border-radius: 14px;
+      padding: 0.75rem 0.85rem;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(141, 63, 45, 0.6);
+      box-shadow: 0 0 0 3px rgba(141, 63, 45, 0.12);
+    }
+
+    textarea {
+      min-height: 108px;
+      resize: vertical;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 0.72rem 1rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 120ms ease, opacity 120ms ease, box-shadow 120ms ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.55; cursor: wait; transform: none; }
+
+    .primary {
+      background: var(--accent);
+      color: #fffaf5;
+      box-shadow: 0 10px 20px rgba(141, 63, 45, 0.18);
+    }
+
+    .secondary {
+      background: var(--accent-2);
+      color: #f7fbfb;
+    }
+
+    .tertiary {
+      background: #efe5cf;
+      color: #5d4716;
+    }
+
+    .full {
+      width: 100%;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-top: 0.15rem;
+    }
+
+    .status {
+      min-height: 1.5rem;
+      font-size: 0.92rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .status.error { color: var(--danger); }
+    .status.ok { color: var(--accent-2); }
+
+    .meta-grid {
+      display: grid;
+      gap: 0.5rem;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 0.85rem;
+    }
+
+    .meta-box {
+      padding: 0.75rem 0.85rem;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(73, 57, 35, 0.1);
+    }
+
+    .meta-box strong {
+      display: block;
+      font-size: 1.15rem;
+      margin-bottom: 0.15rem;
+    }
+
+    .section-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+
+    .list {
+      display: grid;
+      gap: 0.65rem;
+    }
+
+    .list-item {
+      border-radius: 18px;
+      border: 1px solid rgba(73, 57, 35, 0.11);
+      background: rgba(255, 255, 255, 0.74);
+      padding: 0.85rem 0.95rem;
+    }
+
+    .list-item h3 {
+      font-size: 1rem;
+      margin-bottom: 0.22rem;
+    }
+
+    .list-item p {
+      font-size: 0.92rem;
+    }
+
+    .pill-row {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      margin-top: 0.55rem;
+    }
+
+    .pill {
+      font-size: 0.76rem;
+      border-radius: 999px;
+      padding: 0.26rem 0.54rem;
+      background: #f2ead9;
+      color: #5f5548;
+      border: 1px solid rgba(93, 75, 50, 0.12);
+    }
+
+    .topic-link, .entry-link {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px solid rgba(141, 63, 45, 0.18);
+    }
+
+    .topic-link:hover, .entry-link:hover {
+      color: var(--accent);
+      border-bottom-color: rgba(141, 63, 45, 0.5);
+    }
+
+    .code-block {
+      padding: 0.9rem 1rem;
+      border-radius: 18px;
+      background: #1d1a17;
+      color: #efe7db;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.84rem;
+      line-height: 1.42;
+    }
+
+    .split {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .empty {
+      padding: 1.2rem;
+      border-radius: 18px;
+      border: 1px dashed rgba(96, 84, 66, 0.32);
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.42);
+    }
+
+    .graph-shell {
+      display: grid;
+      gap: 0.9rem;
+    }
+
+    .graph-meta {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .graph-canvas {
+      width: 100%;
+      min-height: 360px;
+      border-radius: 20px;
+      border: 1px solid rgba(73, 57, 35, 0.11);
+      background:
+        radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.92), rgba(248, 240, 227, 0.88));
+      overflow: hidden;
+    }
+
+    .graph-svg {
+      width: 100%;
+      height: 360px;
+      display: block;
+    }
+
+    .graph-edge {
+      stroke: rgba(73, 57, 35, 0.28);
+      stroke-width: 1.4;
+    }
+
+    .graph-node {
+      cursor: pointer;
+      transition: transform 120ms ease;
+    }
+
+    .graph-node circle {
+      stroke: rgba(31, 28, 24, 0.22);
+      stroke-width: 1.2;
+    }
+
+    .graph-node:hover text {
+      fill: var(--accent);
+    }
+
+    .graph-label {
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      font-size: 11px;
+      fill: #352d25;
+    }
+
+    .graph-legend {
+      display: flex;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .legend-swatch {
+      width: 0.8rem;
+      height: 0.8rem;
+      border-radius: 999px;
+      border: 1px solid rgba(31, 28, 24, 0.16);
+    }
+
+    .graph-json details {
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.68);
+      border: 1px solid rgba(73, 57, 35, 0.1);
+      padding: 0.75rem 0.9rem;
+    }
+
+    .graph-json summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .graph-json .code-block {
+      margin-top: 0.75rem;
+    }
+
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+      .section-grid, .split, .row, .row-3, .meta-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel sidebar">
+      <h1>CiteGeist Literature Explorer</h1>
+      <p class="lede">
+        Lightweight HTML5 demo for topic bootstrap, topic expansion, search, rough-reference extraction,
+        verification, and entry inspection against the local CiteGeist explorer server.
+      </p>
+
+      <div class="stack">
+        <section class="panel card">
+          <h2>Bridge</h2>
+          <label>
+            Server URL
+            <input id="server-url" value="http://127.0.0.1:8765" />
+          </label>
+          <div class="toolbar">
+            <button id="connect-button" class="primary">Connect</button>
+            <button id="refresh-topics-button" class="tertiary">Refresh Topics</button>
+          </div>
+          <div id="connect-status" class="status">Not connected.</div>
+        </section>
+
+        <section class="panel card">
+          <h2>Topic Bootstrap</h2>
+          <label>
+            Topic Phrase
+            <input id="bootstrap-topic" value="acraniates cephalochordata amphioxus lancelet" />
+          </label>
+          <div class="row">
+            <label>
+              Topic Slug
+              <input id="bootstrap-slug" value="acraniates" />
+            </label>
+            <label>
+              Topic Name
+              <input id="bootstrap-name" value="Acraniates" />
+            </label>
+          </div>
+          <div class="row-3">
+            <label>
+              Topic Limit
+              <input id="bootstrap-topic-limit" type="number" min="1" value="12" />
+            </label>
+            <label>
+              Commit Limit
+              <input id="bootstrap-commit-limit" type="number" min="1" value="8" />
+            </label>
+            <label>
+              Review Status
+              <input id="bootstrap-status" value="draft" />
+            </label>
+          </div>
+          <div class="toolbar">
+            <button id="bootstrap-preview-button" class="secondary">Preview Bootstrap</button>
+            <button id="bootstrap-commit-button" class="primary">Commit Bootstrap</button>
+          </div>
+        </section>
+
+        <section class="panel card">
+          <h2>Topic Expansion</h2>
+          <label>
+            Active Topic Slug
+            <input id="expand-topic-slug" value="acraniates" />
+          </label>
+          <label>
+            Expansion Phrase Override
+            <input id="expand-topic-phrase" value="acraniates cephalochordata amphioxus lancelet" />
+          </label>
+          <div class="row-3">
+            <label>
+              Source
+              <select id="expand-source">
+                <option value="openalex">openalex</option>
+                <option value="crossref">crossref</option>
+              </select>
+            </label>
+            <label>
+              Relation
+              <select id="expand-relation">
+                <option value="cites">cites</option>
+                <option value="cited_by">cited_by</option>
+              </select>
+            </label>
+            <label>
+              Min Relevance
+              <input id="expand-min-relevance" type="number" step="0.05" min="0" max="1" value="0.2" />
+            </label>
+          </div>
+          <div class="row">
+            <label>
+              Seed Limit
+              <input id="expand-seed-limit" type="number" min="1" value="10" />
+            </label>
+            <label>
+              Per Seed Limit
+              <input id="expand-per-seed-limit" type="number" min="1" value="12" />
+            </label>
+          </div>
+          <div class="toolbar">
+            <button id="expand-preview-button" class="secondary">Preview Expansion</button>
+            <button id="expand-commit-button" class="primary">Apply Expansion</button>
+          </div>
+        </section>
+
+        <section class="panel card">
+          <h2>Search</h2>
+          <label>
+            Query
+            <input id="search-query" value="amphioxus" />
+          </label>
+          <label>
+            Restrict to Topic Slug
+            <input id="search-topic" value="acraniates" />
+          </label>
+          <div class="toolbar">
+            <button id="search-button" class="primary full">Run Search</button>
+          </div>
+        </section>
+
+        <section class="panel card">
+          <h2>Extract + Verify</h2>
+          <label>
+            Plaintext Reference
+            <textarea id="extract-text">Bone, Q., 1958, The central nervous system in larval acraniates: Quarterly Journal of Microscopical Science, v. 100, p. 509-527.</textarea>
+          </label>
+          <div class="toolbar">
+            <button id="extract-button" class="tertiary">Extract</button>
+            <button id="verify-button" class="secondary">Verify String</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section class="panel card">
+        <h2>Session</h2>
+        <div class="meta-grid">
+          <div class="meta-box">
+            <strong id="metric-topic-count">0</strong>
+            Topics
+          </div>
+          <div class="meta-box">
+            <strong id="metric-entry-count">0</strong>
+            Topic Entries
+          </div>
+          <div class="meta-box">
+            <strong id="metric-last-op">none</strong>
+            Last Operation
+          </div>
+        </div>
+      </section>
+
+      <section class="section-grid">
+        <section class="panel card">
+          <h2>Topics</h2>
+          <div id="topics-list" class="list empty">Connect to the server to load topics.</div>
+        </section>
+        <section class="panel card">
+          <h2>Entry Detail</h2>
+          <div id="entry-detail" class="empty">Select a topic entry or search result to inspect one record.</div>
+        </section>
+      </section>
+
+      <section class="split">
+        <section class="panel card">
+          <h2>Topic View</h2>
+          <div id="topic-view" class="empty">No topic loaded yet.</div>
+        </section>
+        <section class="panel card">
+          <h2>Activity</h2>
+          <div id="activity-log" class="code-block">Waiting for requests…</div>
+        </section>
+      </section>
+
+      <section class="split">
+        <section class="panel card">
+          <h2>Search Results</h2>
+          <div id="search-results" class="empty">Run a search to inspect matching entries.</div>
+        </section>
+        <section class="panel card">
+          <h2>Extract / Verify Output</h2>
+          <div id="extract-verify-output" class="empty">Extraction and verification results will appear here.</div>
+        </section>
+      </section>
+
+      <section class="panel card">
+        <h2>Graph View</h2>
+        <div id="graph-output" class="empty">Load a topic to view a small local network around its first few entries.</div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { createHttpBridge, createLiteratureExplorerClient } from "./literature-explorer.js";
+
+    const state = {
+      bridgeUrl: "http://127.0.0.1:8765",
+      client: null,
+      topics: [],
+      activeTopic: null,
+      activeTopicEntries: [],
+    };
+
+    const els = {
+      serverUrl: document.getElementById("server-url"),
+      connectButton: document.getElementById("connect-button"),
+      refreshTopicsButton: document.getElementById("refresh-topics-button"),
+      connectStatus: document.getElementById("connect-status"),
+      topicsList: document.getElementById("topics-list"),
+      topicView: document.getElementById("topic-view"),
+      entryDetail: document.getElementById("entry-detail"),
+      searchResults: document.getElementById("search-results"),
+      graphOutput: document.getElementById("graph-output"),
+      extractVerifyOutput: document.getElementById("extract-verify-output"),
+      activityLog: document.getElementById("activity-log"),
+      metricTopicCount: document.getElementById("metric-topic-count"),
+      metricEntryCount: document.getElementById("metric-entry-count"),
+      metricLastOp: document.getElementById("metric-last-op"),
+      bootstrapTopic: document.getElementById("bootstrap-topic"),
+      bootstrapSlug: document.getElementById("bootstrap-slug"),
+      bootstrapName: document.getElementById("bootstrap-name"),
+      bootstrapTopicLimit: document.getElementById("bootstrap-topic-limit"),
+      bootstrapCommitLimit: document.getElementById("bootstrap-commit-limit"),
+      bootstrapStatus: document.getElementById("bootstrap-status"),
+      bootstrapPreviewButton: document.getElementById("bootstrap-preview-button"),
+      bootstrapCommitButton: document.getElementById("bootstrap-commit-button"),
+      expandTopicSlug: document.getElementById("expand-topic-slug"),
+      expandTopicPhrase: document.getElementById("expand-topic-phrase"),
+      expandSource: document.getElementById("expand-source"),
+      expandRelation: document.getElementById("expand-relation"),
+      expandMinRelevance: document.getElementById("expand-min-relevance"),
+      expandSeedLimit: document.getElementById("expand-seed-limit"),
+      expandPerSeedLimit: document.getElementById("expand-per-seed-limit"),
+      expandPreviewButton: document.getElementById("expand-preview-button"),
+      expandCommitButton: document.getElementById("expand-commit-button"),
+      searchQuery: document.getElementById("search-query"),
+      searchTopic: document.getElementById("search-topic"),
+      searchButton: document.getElementById("search-button"),
+      extractText: document.getElementById("extract-text"),
+      extractButton: document.getElementById("extract-button"),
+      verifyButton: document.getElementById("verify-button"),
+    };
+
+    function setStatus(text, kind = "") {
+      els.connectStatus.textContent = text;
+      els.connectStatus.className = `status ${kind}`.trim();
+    }
+
+    function setBusy(button, busy) {
+      if (!button) return;
+      button.disabled = busy;
+    }
+
+    function logActivity(label, payload) {
+      const stamp = new Date().toLocaleTimeString();
+      const rendered = `[${stamp}] ${label}\n${JSON.stringify(payload, null, 2)}`;
+      els.activityLog.textContent = rendered;
+    }
+
+    function setLastOp(value) {
+      els.metricLastOp.textContent = value;
+    }
+
+    function renderEmpty(target, text) {
+      target.className = "empty";
+      target.textContent = text;
+    }
+
+    function renderTopics() {
+      els.metricTopicCount.textContent = String(state.topics.length);
+      if (!state.topics.length) {
+        renderEmpty(els.topicsList, "No topics in the current database.");
+        return;
+      }
+      els.topicsList.className = "list";
+      els.topicsList.innerHTML = state.topics.map((topic) => `
+        <div class="list-item">
+          <h3><a class="topic-link" href="#" data-topic-slug="${escapeHtml(topic.slug)}">${escapeHtml(topic.name)}</a></h3>
+          <p>${escapeHtml(topic.slug)} · ${escapeHtml(topic.source_type || "manual")}</p>
+          <div class="pill-row">
+            <span class="pill">${topic.entry_count} entries</span>
+            ${topic.expansion_phrase ? `<span class="pill">phrase: ${escapeHtml(topic.expansion_phrase)}</span>` : ""}
+          </div>
+        </div>
+      `).join("");
+      els.topicsList.querySelectorAll("[data-topic-slug]").forEach((node) => {
+        node.addEventListener("click", async (event) => {
+          event.preventDefault();
+          await loadTopic(node.getAttribute("data-topic-slug"));
+        });
+      });
+    }
+
+    function renderTopic(payload) {
+      state.activeTopic = payload?.topic || null;
+      state.activeTopicEntries = payload?.entries || [];
+      els.metricEntryCount.textContent = String(state.activeTopicEntries.length);
+      if (!payload || !payload.topic) {
+        renderEmpty(els.topicView, "No topic loaded yet.");
+        return;
+      }
+      const topic = payload.topic;
+      const entries = payload.entries || [];
+      els.expandTopicSlug.value = topic.slug;
+      if (topic.expansion_phrase) {
+        els.expandTopicPhrase.value = topic.expansion_phrase;
+      }
+      els.topicView.className = "list";
+      els.topicView.innerHTML = `
+        <div class="list-item">
+          <h3>${escapeHtml(topic.name)}</h3>
+          <p>${escapeHtml(topic.slug)} · ${escapeHtml(topic.source_type || "manual")} · ${topic.entry_count} entries</p>
+          <div class="pill-row">
+            ${topic.expansion_phrase ? `<span class="pill">${escapeHtml(topic.expansion_phrase)}</span>` : ""}
+            ${topic.source_url ? `<span class="pill">${escapeHtml(topic.source_url)}</span>` : ""}
+          </div>
+        </div>
+        ${entries.map((entry) => `
+          <div class="list-item">
+            <h3><a class="entry-link" href="#" data-entry-key="${escapeHtml(entry.citation_key)}">${escapeHtml(entry.title || entry.citation_key)}</a></h3>
+            <p>${escapeHtml(entry.citation_key)} · ${escapeHtml(entry.entry_type || "misc")} · ${escapeHtml(entry.year || "n.d.")}</p>
+            <div class="pill-row">
+              <span class="pill">confidence: ${Number(entry.confidence ?? 0).toFixed(2)}</span>
+              <span class="pill">${escapeHtml(entry.source_label || "unknown")}</span>
+            </div>
+          </div>
+        `).join("")}
+      `;
+      els.topicView.querySelectorAll("[data-entry-key]").forEach((node) => {
+        node.addEventListener("click", async (event) => {
+          event.preventDefault();
+          await loadEntry(node.getAttribute("data-entry-key"));
+        });
+      });
+    }
+
+    function renderEntry(entry) {
+      if (!entry) {
+        renderEmpty(els.entryDetail, "Entry not found.");
+        return;
+      }
+      els.entryDetail.className = "stack";
+      els.entryDetail.innerHTML = `
+        <div class="list-item">
+          <h3>${escapeHtml(entry.title || entry.citation_key)}</h3>
+          <p>${escapeHtml(entry.citation_key)} · ${escapeHtml(entry.entry_type || "misc")} · ${escapeHtml(entry.year || "n.d.")}</p>
+          <div class="pill-row">
+            ${(entry.topics || []).map((topic) => `<span class="pill">${escapeHtml(topic.slug)}</span>`).join("")}
+          </div>
+        </div>
+        <div class="code-block">${escapeHtml(JSON.stringify(entry, null, 2))}</div>
+      `;
+    }
+
+    function renderSearch(payload) {
+      const results = payload?.results || [];
+      if (!results.length) {
+        renderEmpty(els.searchResults, "No matching entries.");
+        return;
+      }
+      els.searchResults.className = "list";
+      els.searchResults.innerHTML = results.map((row) => `
+        <div class="list-item">
+          <h3><a class="entry-link" href="#" data-entry-key="${escapeHtml(row.citation_key)}">${escapeHtml(row.title || row.citation_key)}</a></h3>
+          <p>${escapeHtml(row.citation_key)} · ${escapeHtml(row.year || "n.d.")} · score ${Number(row.score ?? 0).toFixed(3)}</p>
+        </div>
+      `).join("");
+      els.searchResults.querySelectorAll("[data-entry-key]").forEach((node) => {
+        node.addEventListener("click", async (event) => {
+          event.preventDefault();
+          await loadEntry(node.getAttribute("data-entry-key"));
+        });
+      });
+    }
+
+    function renderGraph(payload) {
+      if (!payload || !payload.nodes?.length) {
+        renderEmpty(els.graphOutput, "No graph payload available.");
+        return;
+      }
+
+      const nodes = payload.nodes || [];
+      const edges = payload.edges || [];
+      const width = 900;
+      const height = 360;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const ringRadius = Math.min(width, height) * 0.32;
+      const laidOut = layoutGraphNodes(nodes, centerX, centerY, ringRadius);
+      const nodeById = new Map(laidOut.map((node) => [node.id, node]));
+
+      const edgeMarkup = edges.map((edge) => {
+        const source = nodeById.get(edge.source);
+        const target = nodeById.get(edge.target);
+        if (!source || !target) return "";
+        return `<line class="graph-edge" x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}"></line>`;
+      }).join("");
+
+      const nodeMarkup = laidOut.map((node) => {
+        const fill = graphNodeColor(node);
+        const radius = node.is_seed ? 13 : 9;
+        const label = escapeHtml(graphNodeLabel(node));
+        return `
+          <g class="graph-node" data-entry-key="${escapeHtml(node.id)}" transform="translate(${node.x}, ${node.y})">
+            <circle r="${radius}" fill="${fill}"></circle>
+            <text class="graph-label" x="${radius + 6}" y="4">${label}</text>
+          </g>
+        `;
+      }).join("");
+
+      const seedCount = laidOut.filter((node) => node.is_seed).length;
+      const resolvedCount = laidOut.filter((node) => node.target_exists !== false).length;
+
+      els.graphOutput.className = "graph-shell";
+      els.graphOutput.innerHTML = `
+        <div class="graph-meta">
+          <span class="pill">${laidOut.length} nodes</span>
+          <span class="pill">${edges.length} edges</span>
+          <span class="pill">${seedCount} seeds</span>
+          <span class="pill">${resolvedCount} stored entries</span>
+        </div>
+        <div class="graph-legend">
+          <span class="legend-item"><span class="legend-swatch" style="background:#8d3f2d"></span>Seed entry</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#2f5f5a"></span>Stored neighbor</span>
+          <span class="legend-item"><span class="legend-swatch" style="background:#9f7a18"></span>External / unresolved</span>
+        </div>
+        <div class="graph-canvas">
+          <svg class="graph-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Entry relationship graph">
+            ${edgeMarkup}
+            ${nodeMarkup}
+          </svg>
+        </div>
+        <div class="graph-json">
+          <details>
+            <summary>Raw graph payload</summary>
+            <div class="code-block">${escapeHtml(JSON.stringify(payload, null, 2))}</div>
+          </details>
+        </div>
+      `;
+
+      els.graphOutput.querySelectorAll("[data-entry-key]").forEach((node) => {
+        node.addEventListener("click", async () => {
+          await loadEntry(node.getAttribute("data-entry-key"));
+        });
+      });
+    }
+
+    function renderExtractVerify(payload) {
+      els.extractVerifyOutput.className = "code-block";
+      els.extractVerifyOutput.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function connect() {
+      setBusy(els.connectButton, true);
+      try {
+        state.bridgeUrl = els.serverUrl.value.trim() || state.bridgeUrl;
+        const bridge = createHttpBridge(state.bridgeUrl);
+        const client = createLiteratureExplorerClient(bridge);
+        const capabilities = await client.capabilities();
+        state.client = client;
+        setStatus(`Connected to ${state.bridgeUrl}`, "ok");
+        setLastOp("connect");
+        logActivity("capabilities", capabilities);
+        await refreshTopics();
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.connectButton, false);
+      }
+    }
+
+    async function refreshTopics() {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      setBusy(els.refreshTopicsButton, true);
+      try {
+        const payload = await state.client.listTopics();
+        state.topics = payload.topics || [];
+        renderTopics();
+        setLastOp("list_topics");
+        logActivity("list_topics", payload);
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.refreshTopicsButton, false);
+      }
+    }
+
+    async function loadTopic(topicSlug) {
+      if (!state.client || !topicSlug) return;
+      const payload = await state.client.getTopic(topicSlug, { entry_limit: 200 });
+      renderTopic(payload);
+      setLastOp("get_topic");
+      logActivity(`get_topic:${topicSlug}`, payload);
+      if (payload?.entries?.length) {
+        const seedKeys = payload.entries.slice(0, Math.min(5, payload.entries.length)).map((entry) => entry.citation_key);
+        const graphPayload = await state.client.graph(seedKeys, { depth: 1 });
+        renderGraph(graphPayload);
+      } else {
+        renderGraph(null);
+      }
+    }
+
+    async function loadEntry(citationKey) {
+      if (!state.client || !citationKey) return;
+      const payload = await state.client.showEntry(citationKey, { include_bibtex: true, include_provenance: true });
+      renderEntry(payload);
+      setLastOp("show_entry");
+      logActivity(`show_entry:${citationKey}`, payload);
+    }
+
+    async function runBootstrap(previewOnly) {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      const button = previewOnly ? els.bootstrapPreviewButton : els.bootstrapCommitButton;
+      setBusy(button, true);
+      try {
+        const payload = await state.client.bootstrap({
+          topic: els.bootstrapTopic.value.trim(),
+          topic_slug: els.bootstrapSlug.value.trim() || undefined,
+          topic_name: els.bootstrapName.value.trim() || undefined,
+          topic_phrase: els.bootstrapTopic.value.trim(),
+          topic_limit: Number(els.bootstrapTopicLimit.value || 5),
+          topic_commit_limit: Number(els.bootstrapCommitLimit.value || 0) || null,
+          preview_only: previewOnly,
+          expand: false,
+          review_status: els.bootstrapStatus.value.trim() || "draft",
+        });
+        renderExtractVerify(payload);
+        setLastOp(previewOnly ? "bootstrap_preview" : "bootstrap_commit");
+        logActivity(previewOnly ? "bootstrap_preview" : "bootstrap_commit", payload);
+        if (!previewOnly) {
+          await refreshTopics();
+          if (els.bootstrapSlug.value.trim()) {
+            await loadTopic(els.bootstrapSlug.value.trim());
+          }
+        }
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(button, false);
+      }
+    }
+
+    async function runExpand(previewOnly) {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      const button = previewOnly ? els.expandPreviewButton : els.expandCommitButton;
+      setBusy(button, true);
+      try {
+        const topicSlug = els.expandTopicSlug.value.trim();
+        const payload = await state.client.expandTopic(topicSlug, {
+          topic_phrase: els.expandTopicPhrase.value.trim() || undefined,
+          source: els.expandSource.value,
+          relation_type: els.expandRelation.value,
+          min_relevance: Number(els.expandMinRelevance.value || 0.2),
+          seed_limit: Number(els.expandSeedLimit.value || 10),
+          per_seed_limit: Number(els.expandPerSeedLimit.value || 12),
+          preview_only: previewOnly,
+        });
+        renderExtractVerify(payload);
+        setLastOp(previewOnly ? "expand_preview" : "expand_commit");
+        logActivity(previewOnly ? "expand_preview" : "expand_commit", payload);
+        if (!previewOnly && topicSlug) {
+          await loadTopic(topicSlug);
+          await refreshTopics();
+        }
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(button, false);
+      }
+    }
+
+    async function runSearch() {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      setBusy(els.searchButton, true);
+      try {
+        const payload = await state.client.search(els.searchQuery.value.trim(), {
+          topic_slug: els.searchTopic.value.trim() || undefined,
+          limit: 20,
+        });
+        renderSearch(payload);
+        setLastOp("search");
+        logActivity("search", payload);
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.searchButton, false);
+      }
+    }
+
+    async function runExtract() {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      setBusy(els.extractButton, true);
+      try {
+        const payload = await state.client.extractText(els.extractText.value, { backend: "heuristic" });
+        renderExtractVerify(payload);
+        setLastOp("extract_text");
+        logActivity("extract_text", payload);
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.extractButton, false);
+      }
+    }
+
+    async function runVerify() {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      setBusy(els.verifyButton, true);
+      try {
+        const payload = await state.client.verifyStrings([els.extractText.value], { limit: 5 });
+        renderExtractVerify(payload);
+        setLastOp("verify_strings");
+        logActivity("verify_strings", payload);
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.verifyButton, false);
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function graphNodeLabel(node) {
+      return node.title || node.id || "entry";
+    }
+
+    function graphNodeColor(node) {
+      if (node.is_seed) return "#8d3f2d";
+      if (node.target_exists === false) return "#9f7a18";
+      return "#2f5f5a";
+    }
+
+    function layoutGraphNodes(nodes, centerX, centerY, ringRadius) {
+      const seeds = nodes.filter((node) => node.is_seed);
+      const others = nodes.filter((node) => !node.is_seed);
+      const laidOutSeeds = layoutRing(seeds, centerX, centerY, ringRadius * 0.42);
+      const laidOutOthers = layoutRing(others, centerX, centerY, ringRadius);
+      return [...laidOutSeeds, ...laidOutOthers];
+    }
+
+    function layoutRing(nodes, centerX, centerY, radius) {
+      if (!nodes.length) return [];
+      if (nodes.length === 1) {
+        return [{ ...nodes[0], x: centerX, y: centerY }];
+      }
+      return nodes.map((node, index) => {
+        const angle = (-Math.PI / 2) + ((Math.PI * 2 * index) / nodes.length);
+        return {
+          ...node,
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+        };
+      });
+    }
+
+    els.connectButton.addEventListener("click", connect);
+    els.refreshTopicsButton.addEventListener("click", refreshTopics);
+    els.bootstrapPreviewButton.addEventListener("click", () => runBootstrap(true));
+    els.bootstrapCommitButton.addEventListener("click", () => runBootstrap(false));
+    els.expandPreviewButton.addEventListener("click", () => runExpand(true));
+    els.expandCommitButton.addEventListener("click", () => runExpand(false));
+    els.searchButton.addEventListener("click", runSearch);
+    els.extractButton.addEventListener("click", runExtract);
+    els.verifyButton.addEventListener("click", runVerify);
+  </script>
+</body>
+</html>
