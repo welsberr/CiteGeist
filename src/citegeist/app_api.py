@@ -9,6 +9,10 @@ from .extract import extract_references
 from .storage import BibliographyStore
 from .verify import BibliographyVerifier
 
+METADATA_SOURCES = ["crossref", "datacite", "openalex", "pubmed"]
+GRAPH_EXPANSION_SOURCES = ["crossref", "openalex"]
+GRAPH_RELATION_TYPES = ["cites", "cited_by", "both"]
+
 
 class LiteratureExplorerApi:
     """JSON-serializable adapter layer for browser or local UI bridges."""
@@ -41,6 +45,11 @@ class LiteratureExplorerApi:
                 "graph",
             ],
             "preview_operations": ["bootstrap", "expand_topic"],
+            "metadata_sources": list(METADATA_SOURCES),
+            "topic_seed_sources": list(METADATA_SOURCES),
+            "graph_expansion_sources": list(GRAPH_EXPANSION_SOURCES),
+            "topic_expansion_sources": list(GRAPH_EXPANSION_SOURCES),
+            "graph_relation_types": list(GRAPH_RELATION_TYPES),
         }
 
     def search(self, query: str, *, limit: int = 20, topic_slug: str | None = None) -> dict[str, object]:

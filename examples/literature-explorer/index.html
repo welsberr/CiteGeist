@@ -561,7 +561,7 @@
           </label>
           <div class="row-3">
             <label>
-              Source
+              Expansion Source
               <select id="expand-source">
                 <option value="openalex">openalex</option>
                 <option value="crossref">crossref</option>
@@ -611,6 +611,7 @@
           <div id="expand-summary" class="summary-box">
             <strong>Expansion Policy</strong>
             <p>Use <code>cites</code> to bias toward newer work, or <code>both</code> for broader graph growth. Recursive rounds stop once the recent-entry target is met.</p>
+            <p id="expand-source-note">Topic graph expansion currently supports openalex and crossref. Metadata search and bootstrap seeding also use datacite and pubmed.</p>
           </div>
         </section>
 
@@ -827,6 +828,7 @@
       expandPreviewButton: document.getElementById("expand-preview-button"),
       expandCommitButton: document.getElementById("expand-commit-button"),
       expandSummary: document.getElementById("expand-summary"),
+      expandSourceNote: document.getElementById("expand-source-note"),
       searchQuery: document.getElementById("search-query"),
       searchTopic: document.getElementById("search-topic"),
       searchButton: document.getElementById("search-button"),
@@ -1081,6 +1083,43 @@
       `;
     }
 
+    function populateSelectOptions(select, values, preferredValue) {
+      if (!select || !Array.isArray(values) || !values.length) return;
+      const previousValue = select.value;
+      select.innerHTML = "";
+      values.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+      if (values.includes(previousValue)) {
+        select.value = previousValue;
+      } else if (values.includes(preferredValue)) {
+        select.value = preferredValue;
+      } else {
+        select.value = values[0];
+      }
+    }
+
+    function applyCapabilities(capabilities) {
+      const topicExpansionSources = capabilities?.topic_expansion_sources || capabilities?.graph_expansion_sources || [];
+      const relationTypes = capabilities?.graph_relation_types || [];
+      const metadataSources = capabilities?.metadata_sources || [];
+      if (topicExpansionSources.length) {
+        populateSelectOptions(els.expandSource, topicExpansionSources, "openalex");
+      }
+      if (relationTypes.length) {
+        populateSelectOptions(els.expandRelation, relationTypes, "cites");
+      }
+      if (els.expandSourceNote) {
+        const expansionText = topicExpansionSources.length ? topicExpansionSources.join(", ") : "openalex, crossref";
+        const metadataText = metadataSources.length ? metadataSources.join(", ") : "crossref, datacite, openalex, pubmed";
+        els.expandSourceNote.textContent =
+          `Topic graph expansion currently supports ${expansionText}. Metadata search and bootstrap seeding also use ${metadataText}.`;
+      }
+    }
+
     async function connect() {
       setBusy(els.connectButton, true);
       try {
@@ -1092,6 +1131,7 @@
         const client = createLiteratureExplorerClient(bridge);
         const capabilities = await client.capabilities();
         state.client = client;
+        applyCapabilities(capabilities);
         setStatus(`Connected to ${state.bridgeUrl}`, "ok");
         setLastOp("connect");
         logActivity("capabilities", capabilities);

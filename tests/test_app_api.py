@@ -107,6 +107,22 @@ def test_literature_explorer_api_search_and_show_entry():
         store.close()
 
 
+def test_literature_explorer_api_capabilities_distinguish_metadata_and_expansion_sources():
+    store = BibliographyStore()
+    try:
+        api = LiteratureExplorerApi(store)
+
+        payload = api.capabilities()
+
+        assert payload["metadata_sources"] == ["crossref", "datacite", "openalex", "pubmed"]
+        assert payload["topic_seed_sources"] == ["crossref", "datacite", "openalex", "pubmed"]
+        assert payload["graph_expansion_sources"] == ["crossref", "openalex"]
+        assert payload["topic_expansion_sources"] == ["crossref", "openalex"]
+        assert payload["graph_relation_types"] == ["cites", "cited_by", "both"]
+    finally:
+        store.close()
+
+
 def test_literature_explorer_api_bootstrap_returns_topic_payload():
     store = BibliographyStore()
     try:

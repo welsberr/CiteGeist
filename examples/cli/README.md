@@ -297,7 +297,7 @@ Expand from one or more seed entries:
 .venv/bin/python -m citegeist --db library.sqlite3 expand langton1989artificial1
 ```
 
-Choose the source:
+Choose the graph expansion source:
 
 ```bash
 .venv/bin/python -m citegeist --db library.sqlite3 expand langton1989artificial1 --source openalex
@@ -333,11 +333,13 @@ Override the topic phrase:
 .venv/bin/python -m citegeist --db library.sqlite3 expand-topic artificial-life --topic-phrase "artificial life alife artificial organisms"
 ```
 
-Choose source and relation:
+Choose graph expansion source and relation:
 
 ```bash
 .venv/bin/python -m citegeist --db library.sqlite3 expand-topic artificial-life --source openalex --relation cited_by
 ```
+
+Note: graph expansion currently supports `openalex` and `crossref`. Metadata resolution, verification, and bootstrap topic seeding also use `datacite` and `pubmed`.
 
 Control seed and discovery limits:
 

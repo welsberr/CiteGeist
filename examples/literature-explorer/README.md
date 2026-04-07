@@ -45,6 +45,11 @@ The adapter exposes JSON-serializable methods suitable for a local web bridge:
 - `verify_bibtex(bibtex_text, context="", limit=5)`
 - `graph(seed_keys, relation_types=None, depth=1, review_status=None, missing_only=False)`
 
+The `capabilities()` payload also distinguishes between broader metadata/search sources and narrower graph-expansion sources:
+
+- metadata and topic seeding currently use `crossref`, `datacite`, `openalex`, and `pubmed`
+- topic graph expansion currently uses `crossref` and `openalex`
+
 ## Browser Contract
 
 A demo app can expose a browser object like:

@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--source",
         choices=["crossref", "openalex"],
         default="crossref",
-        help="External source used for graph expansion",
+        help="Graph expansion source",
     )
     expand_parser.add_argument(
         "--relation",
@@ -221,7 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--source",
         choices=["crossref", "openalex"],
         default="openalex",
-        help="External source used for topic expansion",
+        help="Topic graph expansion source",
     )
     expand_topic_parser.add_argument(
         "--relation",
