@@ -33,6 +33,7 @@ class LiteratureExplorerApi:
                 "show_entry",
                 "list_topics",
                 "get_topic",
+                "export_topic_bibtex",
                 "bootstrap",
                 "expand_topic",
                 "extract_text",
@@ -81,6 +82,22 @@ class LiteratureExplorerApi:
             "entries": self.store.list_topic_entries(topic_slug, limit=entry_limit),
         }
 
+    def export_topic_bibtex(self, topic_slug: str, *, include_stubs: bool = False) -> dict[str, object] | None:
+        topic = self.store.get_topic(topic_slug)
+        if topic is None:
+            return None
+        entries = self.store.list_topic_entries(topic_slug, limit=100000)
+        citation_keys = [row["citation_key"] for row in entries]
+        export = self.store.export_bibtex_report(citation_keys, include_stubs=include_stubs)
+        return {
+            "topic": topic,
+            "entry_count": len(citation_keys),
+            "exported_count": export["exported_count"],
+            "include_stubs": include_stubs,
+            "skipped": export["skipped"],
+            "bibtex": export["bibtex"],
+        }
+
     def bootstrap(
         self,
         *,
@@ -94,6 +111,12 @@ class LiteratureExplorerApi:
         expand: bool = True,
         preview_only: bool = False,
         review_status: str = "draft",
+        expansion_mode: str = "legacy",
+        expansion_rounds: int = 1,
+        recent_years: int | None = None,
+        target_recent_entries: int | None = None,
+        max_expanded_entries: int | None = None,
+        max_expand_seconds: float | None = None,
     ) -> dict[str, object]:
         results = self.bootstrapper.bootstrap(
             self.store,
@@ -107,6 +130,12 @@ class LiteratureExplorerApi:
             topic_slug=topic_slug,
             topic_name=topic_name,
             topic_phrase=topic_phrase,
+            expansion_mode=expansion_mode,
+            expansion_rounds=expansion_rounds,
+            recent_years=recent_years,
+            target_recent_entries=target_recent_entries,
+            max_expanded_entries=max_expanded_entries,
+            max_expand_seconds=max_expand_seconds,
         )
         effective_slug = topic_slug
         if effective_slug is None and topic:
@@ -114,6 +143,7 @@ class LiteratureExplorerApi:
         payload: dict[str, object] = {
             "preview": preview_only,
             "results": [asdict(result) for result in results],
+            "run_meta": dict(getattr(self.bootstrapper, "last_run_meta", {}) or {}),
         }
         if effective_slug is not None:
             payload["topic"] = self.store.get_topic(effective_slug)
@@ -132,6 +162,9 @@ class LiteratureExplorerApi:
         min_relevance: float = 0.2,
         seed_keys: list[str] | None = None,
         preview_only: bool = False,
+        max_rounds: int = 1,
+        recent_years: int | None = None,
+        target_recent_entries: int | None = None,
     ) -> dict[str, object] | None:
         topic = self.store.get_topic(topic_slug)
         if topic is None:
@@ -147,12 +180,16 @@ class LiteratureExplorerApi:
             min_relevance=min_relevance,
             seed_keys=seed_keys,
             preview_only=preview_only,
+            max_rounds=max_rounds,
+            recent_years=recent_years,
+            target_recent_entries=target_recent_entries,
         )
         return {
             "topic": self.store.get_topic(topic_slug),
             "preview": preview_only,
             "results": [asdict(result) for result in results],
             "entries": self.store.list_topic_entries(topic_slug, limit=200),
+            "run_meta": dict(getattr(self.topic_expander, "last_run_meta", {}) or {}),
         }
 
     def extract_text(self, text: str, *, backend: str = "heuristic") -> dict[str, object]:

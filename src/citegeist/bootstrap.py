@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 import re
+import time
 
 from .bibtex import BibEntry, parse_bibtex
-from .expand import CrossrefExpander, OpenAlexExpander
+from .expand import (
+    CrossrefExpander,
+    OpenAlexExpander,
+    _entry_is_recent,
+    _expand_relation_types,
+    _meets_topic_assignment_threshold as _expand_meets_topic_assignment_threshold,
+    _topic_relevance_score as _expand_topic_relevance_score,
+)
 from .resolve import MetadataResolver
 from .storage import BibliographyStore
 
@@ -31,6 +40,7 @@ class Bootstrapper:
         self.resolver = resolver or MetadataResolver()
         self.crossref_expander = crossref_expander or CrossrefExpander(self.resolver)
         self.openalex_expander = openalex_expander or OpenAlexExpander(self.resolver)
+        self.last_run_meta: dict[str, object] = {}
 
     def bootstrap(
         self,
@@ -45,7 +55,25 @@ class Bootstrapper:
         topic_slug: str | None = None,
         topic_name: str | None = None,
         topic_phrase: str | None = None,
+        expansion_mode: str = "legacy",
+        expansion_rounds: int = 1,
+        recent_years: int | None = None,
+        target_recent_entries: int | None = None,
+        max_expanded_entries: int | None = None,
+        max_expand_seconds: float | None = None,
     ) -> list[BootstrapResult]:
+        self.last_run_meta = {
+            "stop_reason": "completed",
+            "expansion_mode": expansion_mode,
+            "preview_only": preview_only,
+            "recent_years": recent_years,
+            "target_recent_entries": target_recent_entries,
+            "max_expanded_entries": max_expanded_entries,
+            "max_expand_seconds": max_expand_seconds,
+            "recent_hits": 0,
+            "recent_topic_hits": 0,
+            "expanded_discoveries": 0,
+        }
         results: list[BootstrapResult] = []
         seed_keys: list[str] = []
         effective_topic_slug = topic_slug or (_slugify(topic) if topic else None)
@@ -140,14 +168,199 @@ class Bootstrapper:
 
         if expand and not preview_only:
             expanded_keys = list(dict.fromkeys(seed_keys))
-            for citation_key in expanded_keys:
-                for item in self.crossref_expander.expand_entry_references(store, citation_key):
-                    results.append(BootstrapResult(item.discovered_citation_key, "crossref_expand", item.created_entry))
-                for item in self.openalex_expander.expand_entry(store, citation_key, relation_type="cites", limit=topic_limit):
-                    results.append(BootstrapResult(item.discovered_citation_key, "openalex_expand", item.created_entry))
+            expanded_discoveries: set[str] = set()
+            deadline = time.monotonic() + max_expand_seconds if max_expand_seconds is not None else None
+            if expansion_mode == "legacy":
+                random.shuffle(expanded_keys)
+                for citation_key in expanded_keys:
+                    if _deadline_reached(deadline):
+                        store.connection.commit()
+                        return results
+                    for item in self.crossref_expander.expand_entry_references(store, citation_key):
+                        results.append(BootstrapResult(item.discovered_citation_key, "crossref_expand", item.created_entry))
+                        expanded_discoveries.add(item.discovered_citation_key)
+                        if max_expanded_entries is not None and len(expanded_discoveries) >= max_expanded_entries:
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expanded_entries",
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            store.connection.commit()
+                            return results
+                        if _deadline_reached(deadline):
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expand_seconds",
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            store.connection.commit()
+                            return results
+                    for item in self.openalex_expander.expand_entry(
+                        store,
+                        citation_key,
+                        relation_type="cites",
+                        limit=topic_limit,
+                    ):
+                        results.append(BootstrapResult(item.discovered_citation_key, "openalex_expand", item.created_entry))
+                        expanded_discoveries.add(item.discovered_citation_key)
+                        if max_expanded_entries is not None and len(expanded_discoveries) >= max_expanded_entries:
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expanded_entries",
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            store.connection.commit()
+                            return results
+                        if _deadline_reached(deadline):
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expand_seconds",
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            store.connection.commit()
+                            return results
+            else:
+                results.extend(
+                    self._bootstrap_openalex_expansion(
+                        store,
+                        expanded_keys,
+                        relation_type=expansion_mode,
+                        limit=topic_limit,
+                        max_rounds=expansion_rounds,
+                        topic_slug=effective_topic_slug,
+                        topic_name=effective_topic_name,
+                        topic_phrase=topic_phrase or topic,
+                        recent_years=recent_years,
+                        target_recent_entries=target_recent_entries,
+                        max_expanded_entries=max_expanded_entries,
+                        deadline=deadline,
+                    )
+                )
 
+        self.last_run_meta.setdefault("stop_reason", "completed")
         store.connection.commit()
         return results
+
+    def _bootstrap_openalex_expansion(
+        self,
+        store: BibliographyStore,
+        seed_keys: list[str],
+        relation_type: str,
+        limit: int,
+        max_rounds: int,
+        topic_slug: str | None,
+        topic_name: str | None,
+        topic_phrase: str | None,
+        recent_years: int | None,
+        target_recent_entries: int | None,
+        max_expanded_entries: int | None,
+        deadline: float | None,
+    ) -> list[BootstrapResult]:
+        results: list[BootstrapResult] = []
+        frontier = list(dict.fromkeys(seed_keys))
+        seen_seeds: set[str] = set()
+        recent_hits: set[str] = set()
+        recent_topic_hits: set[str] = set()
+        expanded_discoveries: set[str] = set()
+
+        for _round in range(max(1, max_rounds)):
+            if not frontier:
+                break
+            if _deadline_reached(deadline):
+                self.last_run_meta.update({
+                    "stop_reason": "max_expand_seconds",
+                    "recent_hits": len(recent_hits),
+                    "recent_topic_hits": len(recent_topic_hits),
+                    "expanded_discoveries": len(expanded_discoveries),
+                })
+                return results
+            next_frontier: list[str] = []
+            for citation_key in frontier:
+                if citation_key in seen_seeds:
+                    continue
+                seen_seeds.add(citation_key)
+                if _deadline_reached(deadline):
+                    self.last_run_meta.update({
+                        "stop_reason": "max_expand_seconds",
+                        "recent_hits": len(recent_hits),
+                        "recent_topic_hits": len(recent_topic_hits),
+                        "expanded_discoveries": len(expanded_discoveries),
+                    })
+                    return results
+                for relation_name in _expand_relation_types(relation_type):
+                    if _deadline_reached(deadline):
+                        self.last_run_meta.update({
+                            "stop_reason": "max_expand_seconds",
+                            "recent_hits": len(recent_hits),
+                            "recent_topic_hits": len(recent_topic_hits),
+                            "expanded_discoveries": len(expanded_discoveries),
+                        })
+                        return results
+                    for item in self.openalex_expander.expand_entry(
+                        store,
+                        citation_key,
+                        relation_type=relation_name,
+                        limit=limit,
+                    ):
+                        discovered_key = item.discovered_citation_key
+                        entry = store.get_entry(discovered_key)
+                        if _entry_is_recent(entry, recent_years):
+                            recent_hits.add(discovered_key)
+                        if topic_slug and topic_name and topic_phrase and entry is not None:
+                            score = _expand_topic_relevance_score(topic_phrase, entry)
+                            if _expand_meets_topic_assignment_threshold(
+                                topic_phrase,
+                                entry,
+                                min_relevance=0.2,
+                                relevance_score=score,
+                            ):
+                                store.add_entry_topic(
+                                    discovered_key,
+                                    topic_slug=topic_slug,
+                                    topic_name=topic_name,
+                                    source_type="bootstrap_expand",
+                                    source_label=f"openalex:{relation_name}:{citation_key}",
+                                    confidence=score,
+                                    expansion_phrase=topic_phrase,
+                                )
+                                if _entry_is_recent(entry, recent_years) and score >= 0.5:
+                                    recent_topic_hits.add(discovered_key)
+                        results.append(BootstrapResult(discovered_key, f"openalex_expand:{relation_name}", item.created_entry))
+                        expanded_discoveries.add(discovered_key)
+                        if discovered_key not in seen_seeds:
+                            next_frontier.append(discovered_key)
+                        if max_expanded_entries is not None and len(expanded_discoveries) >= max_expanded_entries:
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expanded_entries",
+                                "recent_hits": len(recent_hits),
+                                "recent_topic_hits": len(recent_topic_hits),
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            return results
+                        if target_recent_entries is not None and len(recent_topic_hits) >= target_recent_entries:
+                            self.last_run_meta.update({
+                                "stop_reason": "target_recent_entries",
+                                "recent_hits": len(recent_hits),
+                                "recent_topic_hits": len(recent_topic_hits),
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            return results
+                        if _deadline_reached(deadline):
+                            self.last_run_meta.update({
+                                "stop_reason": "max_expand_seconds",
+                                "recent_hits": len(recent_hits),
+                                "recent_topic_hits": len(recent_topic_hits),
+                                "expanded_discoveries": len(expanded_discoveries),
+                            })
+                            return results
+            frontier = list(dict.fromkeys(next_frontier))
+        self.last_run_meta.update({
+            "stop_reason": "frontier_exhausted",
+            "recent_hits": len(recent_hits),
+            "recent_topic_hits": len(recent_topic_hits),
+            "expanded_discoveries": len(expanded_discoveries),
+        })
+        return results
+
+
+def _deadline_reached(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
 
     def _topic_candidates(self, topic: str, seed_keys: list[str], limit: int) -> list[tuple[BibEntry, float]]:
         scored: dict[str, tuple[BibEntry, float]] = {}

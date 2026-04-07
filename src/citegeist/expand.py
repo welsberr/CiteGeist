@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import html
 import re
 from dataclasses import dataclass
@@ -180,6 +181,7 @@ class OpenAlexExpander:
 
             if relation_type == "cites":
                 source_key = citation_key
+                target_key = target_key
             else:
                 source_key = target_key
                 target_key = citation_key
@@ -194,8 +196,8 @@ class OpenAlexExpander:
             )
             results.append(
                 ExpansionResult(
-                    source_citation_key=source_key,
-                    discovered_citation_key=target_key,
+                    source_citation_key=citation_key,
+                    discovered_citation_key=existing_key or discovered.citation_key,
                     created_entry=created,
                     relation_type=relation_type,
                     source_label=f"openalex:{relation_type}:{openalex_id}",
@@ -225,6 +227,7 @@ class TopicExpander:
     ) -> None:
         self.crossref_expander = crossref_expander or CrossrefExpander()
         self.openalex_expander = openalex_expander or OpenAlexExpander()
+        self.last_run_meta: dict[str, object] = {}
 
     def expand_topic(
         self,
@@ -238,7 +241,21 @@ class TopicExpander:
         min_relevance: float = 0.2,
         seed_keys: list[str] | None = None,
         preview_only: bool = False,
+        max_rounds: int = 1,
+        recent_years: int | None = None,
+        target_recent_entries: int | None = None,
     ) -> list[TopicExpansionResult]:
+        self.last_run_meta = {
+            "stop_reason": "completed",
+            "preview_only": preview_only,
+            "relation_type": relation_type,
+            "source": source,
+            "max_rounds": max_rounds,
+            "recent_years": recent_years,
+            "target_recent_entries": target_recent_entries,
+            "recent_hits": 0,
+            "recent_topic_hits": 0,
+        }
         topic = store.get_topic(topic_slug)
         if topic is None:
             return []
@@ -249,59 +266,89 @@ class TopicExpander:
             allowed = set(seed_keys)
             seeds = [seed for seed in seeds if str(seed["citation_key"]) in allowed]
         results: list[TopicExpansionResult] = []
+        frontier = [str(seed["citation_key"]) for seed in seeds]
+        seen_seed_keys: set[str] = set()
+        recent_hits: set[str] = set()
+        recent_topic_hits: set[str] = set()
 
-        for seed in seeds:
-            seed_key = str(seed["citation_key"])
-            if preview_only:
-                discovered_rows = self._preview_discoveries(
-                    store,
-                    seed_key,
-                    source=source,
-                    relation_type=relation_type,
-                    limit=per_seed_limit,
-                )
-            else:
-                discovered_rows = self._materialized_discoveries(
-                    store,
-                    seed_key,
-                    source=source,
-                    relation_type=relation_type,
-                    limit=per_seed_limit,
-                )
-
-            for row, target_entry in discovered_rows:
-                score = _topic_relevance_score(phrase, target_entry)
-                meets_threshold = _meets_topic_assignment_threshold(
-                    phrase,
-                    target_entry,
-                    min_relevance=min_relevance,
-                    relevance_score=score,
-                )
-                assigned = False
-                if not preview_only and meets_threshold and target_entry is not None:
-                    assigned = store.add_entry_topic(
-                        row.discovered_citation_key,
-                        topic_slug=topic_slug,
-                        topic_name=str(topic.get("name") or topic_slug),
-                        source_type="topic_expand",
-                        source_url=str(topic.get("source_url") or ""),
-                        source_label=f"{source}:{relation_type}:{seed_key}",
-                        confidence=score,
+        for _round in range(max(1, max_rounds)):
+            if not frontier:
+                break
+            next_frontier: list[str] = []
+            for seed_key in frontier:
+                if seed_key in seen_seed_keys:
+                    continue
+                seen_seed_keys.add(seed_key)
+                if preview_only:
+                    discovered_rows = self._preview_discoveries(
+                        store,
+                        seed_key,
+                        source=source,
+                        relation_type=relation_type,
+                        limit=per_seed_limit,
                     )
-                results.append(
-                    TopicExpansionResult(
-                        topic_slug=topic_slug,
-                        source_citation_key=row.source_citation_key,
-                        discovered_citation_key=row.discovered_citation_key,
-                        discovered_title=str(target_entry.get("title") or ""),
-                        created_entry=row.created_entry,
-                        relation_type=row.relation_type,
-                        source_label=row.source_label,
+                else:
+                    discovered_rows = self._materialized_discoveries(
+                        store,
+                        seed_key,
+                        source=source,
+                        relation_type=relation_type,
+                        limit=per_seed_limit,
+                    )
+
+                for row, target_entry in discovered_rows:
+                    score = _topic_relevance_score(phrase, target_entry)
+                    meets_threshold = _meets_topic_assignment_threshold(
+                        phrase,
+                        target_entry,
+                        min_relevance=min_relevance,
                         relevance_score=score,
-                        meets_relevance_threshold=meets_threshold,
-                        assigned_to_topic=assigned,
                     )
-                )
+                    assigned = False
+                    if not preview_only and meets_threshold and target_entry is not None:
+                        assigned = store.add_entry_topic(
+                            row.discovered_citation_key,
+                            topic_slug=topic_slug,
+                            topic_name=str(topic.get("name") or topic_slug),
+                            source_type="topic_expand",
+                            source_url=str(topic.get("source_url") or ""),
+                            source_label=f"{source}:{row.relation_type}:{seed_key}",
+                            confidence=score,
+                        )
+                        if assigned and _entry_is_recent(target_entry, recent_years) and score >= 0.5:
+                            recent_topic_hits.add(row.discovered_citation_key)
+                    if _entry_is_recent(target_entry, recent_years):
+                        recent_hits.add(row.discovered_citation_key)
+                    if row.discovered_citation_key not in seen_seed_keys:
+                        next_frontier.append(row.discovered_citation_key)
+                    results.append(
+                        TopicExpansionResult(
+                            topic_slug=topic_slug,
+                            source_citation_key=row.source_citation_key,
+                            discovered_citation_key=row.discovered_citation_key,
+                            discovered_title=str(target_entry.get("title") or ""),
+                            created_entry=row.created_entry,
+                            relation_type=row.relation_type,
+                            source_label=row.source_label,
+                            relevance_score=score,
+                            meets_relevance_threshold=meets_threshold,
+                            assigned_to_topic=assigned,
+                        )
+                    )
+                    if target_recent_entries is not None and len(recent_topic_hits) >= target_recent_entries:
+                        self.last_run_meta.update({
+                            "stop_reason": "target_recent_entries",
+                            "recent_hits": len(recent_hits),
+                            "recent_topic_hits": len(recent_topic_hits),
+                        })
+                        store.connection.commit()
+                        return results
+            frontier = list(dict.fromkeys(next_frontier))
+        self.last_run_meta.update({
+            "stop_reason": "frontier_exhausted",
+            "recent_hits": len(recent_hits),
+            "recent_topic_hits": len(recent_topic_hits),
+        })
         store.connection.commit()
         return results
 
@@ -316,12 +363,16 @@ class TopicExpander:
         if source == "crossref":
             expansion_rows = self.crossref_expander.expand_entry_references(store, citation_key)
         else:
-            expansion_rows = self.openalex_expander.expand_entry(
-                store,
-                citation_key,
-                relation_type=relation_type,
-                limit=limit,
-            )
+            expansion_rows: list[ExpansionResult] = []
+            for relation_name in _expand_relation_types(relation_type):
+                expansion_rows.extend(
+                    self.openalex_expander.expand_entry(
+                        store,
+                        citation_key,
+                        relation_type=relation_name,
+                        limit=limit,
+                    )
+                )
         return [(row, store.get_entry(row.discovered_citation_key)) for row in expansion_rows]
 
     def _preview_discoveries(
@@ -334,7 +385,10 @@ class TopicExpander:
     ) -> list[tuple[ExpansionResult, dict[str, object]]]:
         if source == "crossref":
             return self._preview_crossref_discoveries(store, citation_key, limit)
-        return self._preview_openalex_discoveries(store, citation_key, relation_type, limit)
+        rows: list[tuple[ExpansionResult, dict[str, object]]] = []
+        for relation_name in _expand_relation_types(relation_type):
+            rows.extend(self._preview_openalex_discoveries(store, citation_key, relation_name, limit))
+        return rows
 
     def _preview_crossref_discoveries(
         self,
@@ -399,11 +453,10 @@ class TopicExpander:
             if existing_key is None and _skip_openalex_review_like_duplicate(store, discovered):
                 continue
             target_key = existing_key or discovered.citation_key
-            source_key = citation_key if relation_type == "cites" else target_key
             rows.append(
                 (
                     ExpansionResult(
-                        source_citation_key=source_key,
+                        source_citation_key=citation_key,
                         discovered_citation_key=target_key,
                         created_entry=existing_key is None and store.get_entry(discovered.citation_key) is None,
                         relation_type=relation_type,
@@ -439,6 +492,21 @@ def _crossref_reference_to_entry(reference: dict, source_citation_key: str, ordi
     citation_key = _reference_citation_key(reference, title, year, ordinal)
     entry_type = _crossref_reference_entry_type(reference, title, journal_title)
     return BibEntry(entry_type=entry_type, citation_key=citation_key, fields=fields)
+
+
+def _expand_relation_types(relation_type: str) -> list[str]:
+    if relation_type == "both":
+        return ["cites", "cited_by"]
+    return [relation_type]
+
+
+def _entry_is_recent(entry: dict[str, object] | None, recent_years: int | None) -> bool:
+    if entry is None or recent_years is None or recent_years < 0:
+        return False
+    year_value = str(entry.get("year") or "").strip()
+    if not year_value.isdigit():
+        return False
+    return int(year_value) >= date.today().year - recent_years
 
 
 def _crossref_reference_title(reference: dict, ordinal: int) -> str:

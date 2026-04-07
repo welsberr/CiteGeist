@@ -189,6 +189,12 @@ class TalkOriginsScraper:
         expand: bool = False,
         topic_limit: int = 5,
         topic_commit_limit: int | None = None,
+        expansion_mode: str = "legacy",
+        expansion_rounds: int = 1,
+        recent_years: int | None = None,
+        target_recent_entries: int | None = None,
+        max_expanded_entries: int | None = None,
+        max_expand_seconds: float | None = None,
         resume: bool = True,
     ) -> TalkOriginsBatchExport:
         output_root = Path(output_dir)
@@ -286,6 +292,12 @@ class TalkOriginsScraper:
                     "status": review_status,
                     "topic_limit": topic_limit,
                     "topic_commit_limit": topic_commit_limit,
+                    "expansion_mode": expansion_mode,
+                    "expansion_rounds": expansion_rounds,
+                    "recent_years": recent_years,
+                    "target_recent_entries": target_recent_entries,
+                    "max_expanded_entries": max_expanded_entries,
+                    "max_expand_seconds": max_expand_seconds,
                 }
             )
 

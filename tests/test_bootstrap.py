@@ -1,6 +1,7 @@
 from citegeist import BibliographyStore
 from citegeist.bootstrap import Bootstrapper
 from citegeist.cli import main
+from citegeist.expand import ExpansionResult
 
 
 def test_bootstrap_from_seed_bib_only():
@@ -295,6 +296,169 @@ def test_bootstrap_topic_commit_requires_title_anchor():
         topic_entries = store.list_topic_entries("acraniates")
         assert [item["citation_key"] for item in topic_entries] == ["anchored2024"]
         assert store.get_entry("broad2024") is None
+    finally:
+        store.close()
+
+
+def test_bootstrap_nonlegacy_both_mode_expands_both_relations():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        calls: list[tuple[str, str, int]] = []
+
+        bootstrapper.openalex_expander.expand_entry = lambda _store, key, relation_type="cites", limit=5: (  # type: ignore[method-assign]
+            calls.append((key, relation_type, limit)) or []
+        )
+
+        bootstrapper.bootstrap(
+            store,
+            seed_bibtex="""
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+            expansion_mode="both",
+            expand=True,
+        )
+
+        assert calls == [("seed2024", "cites", 5), ("seed2024", "cited_by", 5)]
+    finally:
+        store.close()
+
+
+def test_bootstrap_recent_target_stops_recursive_openalex_expansion():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        store.upsert_entry(
+            BibEntry(entry_type="article", citation_key="recent2026", fields={"title": "Recent discovery", "year": "2026"}),
+            source_type="graph_expand",
+            source_label="test",
+            review_status="draft",
+        )
+        store.connection.commit()
+
+        def fake_expand(_store, key, relation_type="cites", limit=5):
+            if key == "seed2024":
+                return [
+                    ExpansionResult(
+                        "seed2024",
+                        "recent2026",
+                        False,
+                        relation_type,
+                        f"openalex:{relation_type}:seed2024",
+                    )
+                ]
+            return []
+
+        bootstrapper.openalex_expander.expand_entry = fake_expand  # type: ignore[method-assign]
+
+        results = bootstrapper.bootstrap(
+            store,
+            seed_bibtex="""
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+            expansion_mode="cites",
+            expansion_rounds=3,
+            recent_years=2,
+            target_recent_entries=1,
+            expand=True,
+        )
+
+        assert [item.origin for item in results][-1] == "openalex_expand:cites"
+        assert [item.citation_key for item in results if item.origin.startswith("openalex_expand")] == ["recent2026"]
+    finally:
+        store.close()
+
+
+def test_bootstrap_max_expanded_entries_caps_growth():
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        from citegeist import BibEntry
+
+        store.upsert_entry(
+            BibEntry(entry_type="article", citation_key="d1", fields={"title": "Discovery One", "year": "2024"}),
+            source_type="graph_expand",
+            source_label="test",
+            review_status="draft",
+        )
+        store.upsert_entry(
+            BibEntry(entry_type="article", citation_key="d2", fields={"title": "Discovery Two", "year": "2024"}),
+            source_type="graph_expand",
+            source_label="test",
+            review_status="draft",
+        )
+        store.connection.commit()
+
+        bootstrapper.openalex_expander.expand_entry = lambda _store, key, relation_type="cites", limit=5: (  # type: ignore[method-assign]
+            [
+                ExpansionResult(key, "d1", False, relation_type, f"openalex:{relation_type}:{key}"),
+                ExpansionResult(key, "d2", False, relation_type, f"openalex:{relation_type}:{key}"),
+            ]
+            if key == "seed2024"
+            else []
+        )
+
+        results = bootstrapper.bootstrap(
+            store,
+            seed_bibtex="""
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+""",
+            expansion_mode="cites",
+            expand=True,
+            max_expanded_entries=1,
+        )
+
+        assert [item.citation_key for item in results if item.origin.startswith("openalex_expand")] == ["d1"]
+    finally:
+        store.close()
+
+
+def test_bootstrap_max_expand_seconds_stops_legacy_expansion(monkeypatch):
+    store = BibliographyStore()
+    try:
+        bootstrapper = Bootstrapper()
+        ticks = iter([0.0, 0.0, 2.0, 2.0, 2.0])
+        monkeypatch.setattr("citegeist.bootstrap.time.monotonic", lambda: next(ticks))
+        calls: list[str] = []
+
+        bootstrapper.crossref_expander.expand_entry_references = lambda _store, key: (calls.append(f"crossref:{key}") or [])  # type: ignore[method-assign]
+        bootstrapper.openalex_expander.expand_entry = lambda _store, key, relation_type="cites", limit=5: (calls.append(f"openalex:{key}") or [])  # type: ignore[method-assign]
+
+        bootstrapper.bootstrap(
+            store,
+            seed_bibtex="""
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Seed Paper},
+  year = {2024}
+}
+
+@article{seed2023,
+  author = {Seed, Bob},
+  title = {Older Seed},
+  year = {2023}
+}
+""",
+            expansion_mode="legacy",
+            expand=True,
+            max_expand_seconds=1.0,
+        )
+
+        assert len(calls) <= 2
     finally:
         store.close()
 

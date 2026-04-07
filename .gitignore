@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 *.egg-info/
 library.sqlite3
+ops/

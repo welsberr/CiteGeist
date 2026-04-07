@@ -1049,6 +1049,13 @@ class BibliographyStore:
         return render_bibtex([entry])
 
     def export_bibtex(self, citation_keys: list[str] | None = None, include_stubs: bool | None = None) -> str:
+        return self.export_bibtex_report(citation_keys, include_stubs=include_stubs)["bibtex"]
+
+    def export_bibtex_report(
+        self,
+        citation_keys: list[str] | None = None,
+        include_stubs: bool | None = None,
+    ) -> dict[str, object]:
         explicit_keys = citation_keys is not None
         if include_stubs is None:
             include_stubs = explicit_keys
@@ -1058,7 +1065,6 @@ class BibliographyStore:
             ).fetchall()
             citation_keys = [str(row["citation_key"]) for row in rows]
 
-        chunks: list[str] = []
         entries: list[BibEntry] = []
         for citation_key in citation_keys:
             entry = self._load_bib_entry(citation_key)
@@ -1066,9 +1072,27 @@ class BibliographyStore:
                 if not include_stubs and self._is_export_stub(entry):
                     continue
                 entries.append(entry)
-        if not entries:
-            return ""
-        return render_bibtex(entries)
+        chunks: list[str] = []
+        skipped: list[dict[str, str]] = []
+        for entry in entries:
+            try:
+                rendered = render_bibtex([entry]).strip()
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "citation_key": entry.citation_key,
+                        "error": str(exc),
+                    }
+                )
+                continue
+            if rendered:
+                chunks.append(rendered)
+        return {
+            "bibtex": "\n\n".join(chunks).strip(),
+            "requested_count": len(entries),
+            "exported_count": len(chunks),
+            "skipped": skipped,
+        }
 
     def _detect_fts5(self) -> bool:
         try:

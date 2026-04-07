@@ -56,6 +56,12 @@ class BatchBootstrapRunner:
             topic_slug = job.get("topic_slug")
             topic_name = job.get("topic_name")
             topic_phrase = job.get("topic_phrase")
+            expansion_mode = str(job.get("expansion_mode", "legacy"))
+            expansion_rounds = int(job.get("expansion_rounds", 1))
+            recent_years = job.get("recent_years")
+            target_recent_entries = job.get("target_recent_entries")
+            max_expanded_entries = job.get("max_expanded_entries")
+            max_expand_seconds = job.get("max_expand_seconds")
 
             seed_bibtex = None
             if seed_bib:
@@ -73,6 +79,12 @@ class BatchBootstrapRunner:
                 topic_slug=str(topic_slug) if topic_slug else None,
                 topic_name=str(topic_name) if topic_name else None,
                 topic_phrase=str(topic_phrase) if topic_phrase else None,
+                expansion_mode=expansion_mode,
+                expansion_rounds=expansion_rounds,
+                recent_years=int(recent_years) if recent_years is not None else None,
+                target_recent_entries=int(target_recent_entries) if target_recent_entries is not None else None,
+                max_expanded_entries=int(max_expanded_entries) if max_expanded_entries is not None else None,
+                max_expand_seconds=float(max_expand_seconds) if max_expand_seconds is not None else None,
             )
             results.append(BatchJobResult(name, len(job_results), job_results))
         return results

@@ -11,7 +11,7 @@ from .batch import BatchBootstrapRunner, load_batch_jobs
 from .bibtex import parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .examples.talkorigins import TalkOriginsScraper
-from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander
+from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
 from .extract import (
     available_extraction_backends,
     check_extraction_comparison_summary,
@@ -202,7 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     expand_parser.add_argument(
         "--relation",
-        choices=["cites", "cited_by"],
+        choices=["cites", "cited_by", "both"],
         default="cites",
         help="Graph direction to expand for sources that support it",
     )
@@ -225,12 +225,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     expand_topic_parser.add_argument(
         "--relation",
-        choices=["cites", "cited_by"],
+        choices=["cites", "cited_by", "both"],
         default="cites",
         help="Graph direction to expand for sources that support it",
     )
     expand_topic_parser.add_argument("--seed-limit", type=int, default=25, help="Maximum topic seed entries to expand from")
     expand_topic_parser.add_argument("--per-seed-limit", type=int, default=25, help="Maximum discovered works to fetch per seed")
+    expand_topic_parser.add_argument("--rounds", type=int, default=1, help="Maximum recursive expansion rounds")
+    expand_topic_parser.add_argument(
+        "--recent-years",
+        type=int,
+        help="Treat discoveries within this many years of the current year as recent for termination heuristics",
+    )
+    expand_topic_parser.add_argument(
+        "--target-recent-entries",
+        type=int,
+        help="Stop recursive topic expansion once this many recent discoveries have been found",
+    )
     expand_topic_parser.add_argument(
         "--seed-key",
         action="append",
@@ -301,6 +312,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not run immediate graph expansion after seeding",
     )
     bootstrap_parser.add_argument(
+        "--expansion-mode",
+        choices=["legacy", "cites", "cited_by", "both"],
+        default="legacy",
+        help="Expansion policy after bootstrap seeding; legacy keeps Crossref refs plus OpenAlex cites",
+    )
+    bootstrap_parser.add_argument(
+        "--expansion-rounds",
+        type=int,
+        default=1,
+        help="Maximum recursive OpenAlex expansion rounds for non-legacy expansion modes",
+    )
+    bootstrap_parser.add_argument(
+        "--recent-years",
+        type=int,
+        help="Treat discoveries within this many years of the current year as recent for termination heuristics",
+    )
+    bootstrap_parser.add_argument(
+        "--target-recent-entries",
+        type=int,
+        help="Stop non-legacy expansion once this many recent discoveries have been found",
+    )
+    bootstrap_parser.add_argument(
+        "--max-expanded-entries",
+        type=int,
+        help="Hard cap on unique discovered entries added during one bootstrap job",
+    )
+    bootstrap_parser.add_argument(
+        "--max-expand-seconds",
+        type=float,
+        help="Wall-clock cap for one bootstrap job's expansion phase",
+    )
+    bootstrap_parser.add_argument(
         "--preview",
         action="store_true",
         help="Preview ranked bootstrap candidates without writing to the database or expanding",
@@ -363,6 +406,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--topic-commit-limit",
         type=int,
         help="Default bootstrap topic commit limit to include in generated jobs",
+    )
+    talkorigins_parser.add_argument(
+        "--expansion-mode",
+        choices=["legacy", "cites", "cited_by", "both"],
+        default="legacy",
+        help="Expansion policy to write into generated bootstrap jobs",
+    )
+    talkorigins_parser.add_argument(
+        "--expansion-rounds",
+        type=int,
+        default=1,
+        help="Maximum recursive OpenAlex expansion rounds to write into generated jobs",
+    )
+    talkorigins_parser.add_argument(
+        "--recent-years",
+        type=int,
+        help="Optional recent-discovery window to write into generated jobs",
+    )
+    talkorigins_parser.add_argument(
+        "--target-recent-entries",
+        type=int,
+        help="Optional recent-discovery target to write into generated jobs",
+    )
+    talkorigins_parser.add_argument(
+        "--max-expanded-entries",
+        type=int,
+        help="Optional hard cap on unique discovered entries per generated bootstrap job",
+    )
+    talkorigins_parser.add_argument(
+        "--max-expand-seconds",
+        type=float,
+        help="Optional wall-clock cap to write into generated bootstrap jobs",
     )
     talkorigins_parser.add_argument("--status", default="draft", help="Review status for generated seed jobs")
 
@@ -637,6 +712,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.min_relevance,
                 args.seed_keys,
                 args.preview,
+                args.rounds,
+                args.recent_years,
+                args.target_recent_entries,
+                args.max_expanded_entries,
+                args.max_expand_seconds,
             )
         if args.command == "set-topic-phrase":
             return _run_set_topic_phrase(store, args.topic_slug, args.phrase, args.clear)
@@ -666,6 +746,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.topic_slug,
                 args.topic_name,
                 args.store_topic_phrase,
+                args.expansion_mode,
+                args.expansion_rounds,
+                args.recent_years,
+                args.target_recent_entries,
             )
         if args.command == "bootstrap-batch":
             return _run_bootstrap_batch(store, Path(args.input))
@@ -682,6 +766,12 @@ def main(argv: list[str] | None = None) -> int:
                 not args.no_resume,
                 args.topic_limit,
                 args.topic_commit_limit,
+                args.expansion_mode,
+                args.expansion_rounds,
+                args.recent_years,
+                args.target_recent_entries,
+                args.max_expanded_entries,
+                args.max_expand_seconds,
                 args.status,
             )
         if args.command in {"example-talkorigins-validate", "validate-talkorigins"}:
@@ -1387,7 +1477,11 @@ def _run_expand(
         expand_fn = lambda key: expander.expand_entry_references(store, key)
     elif source == "openalex":
         expander = OpenAlexExpander()
-        expand_fn = lambda key: expander.expand_entry(store, key, relation_type=relation, limit=limit)
+        expand_fn = lambda key: [
+            item
+            for relation_name in _expand_relation_types(relation)
+            for item in expander.expand_entry(store, key, relation_type=relation_name, limit=limit)
+        ]
     else:
         print(f"Unsupported expansion source: {source}", file=sys.stderr)
         return 1
@@ -1412,6 +1506,9 @@ def _run_expand_topic(
     min_relevance: float,
     seed_keys: list[str] | None,
     preview: bool,
+    rounds: int,
+    recent_years: int | None,
+    target_recent_entries: int | None,
 ) -> int:
     expander = TopicExpander()
     _print_phase(f"Loading topic expansion for {topic_slug}")
@@ -1430,6 +1527,9 @@ def _run_expand_topic(
         min_relevance=min_relevance,
         seed_keys=seed_keys,
         preview_only=preview,
+        max_rounds=rounds,
+        recent_years=recent_years,
+        target_recent_entries=target_recent_entries,
     )
     print(json.dumps([asdict(result) for result in results], indent=2))
     return 0
@@ -1513,6 +1613,12 @@ def _run_bootstrap(
     topic_slug: str | None,
     topic_name: str | None,
     stored_topic_phrase: str | None,
+    expansion_mode: str,
+    expansion_rounds: int,
+    recent_years: int | None,
+    target_recent_entries: int | None,
+    max_expanded_entries: int | None,
+    max_expand_seconds: float | None,
 ) -> int:
     if not seed_bib and not topic:
         print("bootstrap requires --seed-bib, --topic, or both", file=sys.stderr)
@@ -1533,6 +1639,12 @@ def _run_bootstrap(
         topic_slug=topic_slug,
         topic_name=topic_name,
         topic_phrase=stored_topic_phrase,
+        expansion_mode=expansion_mode,
+        expansion_rounds=expansion_rounds,
+        recent_years=recent_years,
+        target_recent_entries=target_recent_entries,
+        max_expanded_entries=max_expanded_entries,
+        max_expand_seconds=max_expand_seconds,
     )
     print(json.dumps([asdict(result) for result in results], indent=2))
     return 0
@@ -1570,6 +1682,12 @@ def _run_scrape_talkorigins(
     resume: bool,
     topic_limit: int,
     topic_commit_limit: int | None,
+    expansion_mode: str,
+    expansion_rounds: int,
+    recent_years: int | None,
+    target_recent_entries: int | None,
+    max_expanded_entries: int | None,
+    max_expand_seconds: float | None,
     review_status: str,
 ) -> int:
     scraper = TalkOriginsScraper()
@@ -1586,6 +1704,12 @@ def _run_scrape_talkorigins(
         resume=resume,
         topic_limit=topic_limit,
         topic_commit_limit=topic_commit_limit,
+        expansion_mode=expansion_mode,
+        expansion_rounds=expansion_rounds,
+        recent_years=recent_years,
+        target_recent_entries=target_recent_entries,
+        max_expanded_entries=max_expanded_entries,
+        max_expand_seconds=max_expand_seconds,
     )
     print(json.dumps(asdict(export), indent=2))
     return 0

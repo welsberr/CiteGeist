@@ -11,8 +11,10 @@ from citegeist.storage import BibliographyStore
 class FakeOpenAlexExpander:
     def __init__(self, results: list[ExpansionResult] | dict[str, list[ExpansionResult]]) -> None:
         self.results = results
+        self.calls: list[tuple[str, str, int]] = []
 
     def expand_entry(self, store, citation_key, relation_type="cites", limit=25):
+        self.calls.append((citation_key, relation_type, limit))
         if isinstance(self.results, dict):
             return list(self.results.get(citation_key, []))
         return list(self.results)
@@ -212,6 +214,101 @@ def test_topic_expander_preview_discovers_without_writing():
         assert results[0].created_entry is True
         assert store.get_entry("preview1") is None
         assert store.get_entry_topics("preview1") == []
+    finally:
+        store.close()
+
+
+def test_topic_expander_relation_type_both_uses_both_openalex_directions():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Abiogenesis Seed Paper},
+  year = {2024}
+}
+"""
+        )
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="abiogenesis",
+            topic_name="Abiogenesis",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/abiogenesis",
+            source_label="seed",
+        )
+        fake_expander = FakeOpenAlexExpander([])
+        expander = TopicExpander(openalex_expander=fake_expander)
+
+        expander.expand_topic(store, "abiogenesis", relation_type="both")
+
+        assert [relation for _seed, relation, _limit in fake_expander.calls] == ["cites", "cited_by"]
+    finally:
+        store.close()
+
+
+def test_topic_expander_stops_once_recent_target_is_reached():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Abiogenesis Seed Paper},
+  year = {2024}
+}
+"""
+        )
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="abiogenesis",
+            topic_name="Abiogenesis",
+            source_type="talkorigins",
+            source_url="https://example.org/topics/abiogenesis",
+            source_label="seed",
+        )
+        store.upsert_entry(
+            BibEntry(
+                entry_type="article",
+                citation_key="recent1",
+                fields={"title": "Abiogenesis pathways", "abstract": "abiogenesis", "year": "2026"},
+            ),
+            source_type="graph_expand",
+            source_label="test",
+            review_status="draft",
+        )
+        store.upsert_entry(
+            BibEntry(
+                entry_type="article",
+                citation_key="recent2",
+                fields={"title": "Abiogenesis chemistry", "abstract": "abiogenesis", "year": "2025"},
+            ),
+            source_type="graph_expand",
+            source_label="test",
+            review_status="draft",
+        )
+        store.connection.commit()
+
+        fake_expander = FakeOpenAlexExpander(
+            {
+                "seed2024": [ExpansionResult("seed2024", "recent1", False, "cites", "openalex:cites:seed2024")],
+                "recent1": [ExpansionResult("recent1", "recent2", False, "cites", "openalex:cites:recent1")],
+            }
+        )
+        expander = TopicExpander(openalex_expander=fake_expander)
+
+        results = expander.expand_topic(
+            store,
+            "abiogenesis",
+            topic_phrase="abiogenesis chemistry",
+            max_rounds=3,
+            recent_years=2,
+            target_recent_entries=1,
+        )
+
+        assert [item.discovered_citation_key for item in results] == ["recent1"]
+        assert fake_expander.calls == [("seed2024", "cites", 25)]
     finally:
         store.close()
 

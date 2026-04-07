@@ -127,3 +127,93 @@ def test_bootstrap_batch_cli_runs_json_jobs(tmp_path: Path):
         exit_code = main(["--db", str(database), "bootstrap-batch", str(batch_json)])
 
     assert exit_code == 0
+
+
+def test_batch_runner_passes_new_expansion_settings(tmp_path: Path):
+    jobs = [
+        {
+            "name": "topic-job",
+            "topic": "graph topic",
+            "expand": True,
+            "expansion_mode": "both",
+            "expansion_rounds": 3,
+            "recent_years": 5,
+            "target_recent_entries": 12,
+        }
+    ]
+
+    runner = BatchBootstrapRunner()
+    store = BibliographyStore()
+    try:
+        captured: dict[str, object] = {}
+
+        def fake_bootstrap(_store, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        runner.bootstrapper.bootstrap = fake_bootstrap  # type: ignore[method-assign]
+        runner.run(store, jobs)
+
+        assert captured["expansion_mode"] == "both"
+        assert captured["expansion_rounds"] == 3
+        assert captured["recent_years"] == 5
+        assert captured["target_recent_entries"] == 12
+        assert captured["max_expanded_entries"] is None
+    finally:
+        store.close()
+
+
+def test_batch_runner_passes_max_expanded_entries(tmp_path: Path):
+    jobs = [
+        {
+            "name": "topic-job",
+            "topic": "graph topic",
+            "expand": True,
+            "expansion_mode": "cites",
+            "max_expanded_entries": 25,
+        }
+    ]
+
+    runner = BatchBootstrapRunner()
+    store = BibliographyStore()
+    try:
+        captured: dict[str, object] = {}
+
+        def fake_bootstrap(_store, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        runner.bootstrapper.bootstrap = fake_bootstrap  # type: ignore[method-assign]
+        runner.run(store, jobs)
+
+        assert captured["max_expanded_entries"] == 25
+    finally:
+        store.close()
+
+
+def test_batch_runner_passes_max_expand_seconds(tmp_path: Path):
+    jobs = [
+        {
+            "name": "topic-job",
+            "topic": "graph topic",
+            "expand": True,
+            "expansion_mode": "legacy",
+            "max_expand_seconds": 12.5,
+        }
+    ]
+
+    runner = BatchBootstrapRunner()
+    store = BibliographyStore()
+    try:
+        captured: dict[str, object] = {}
+
+        def fake_bootstrap(_store, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        runner.bootstrapper.bootstrap = fake_bootstrap  # type: ignore[method-assign]
+        runner.run(store, jobs)
+
+        assert captured["max_expand_seconds"] == 12.5
+    finally:
+        store.close()

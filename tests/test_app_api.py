@@ -6,7 +6,11 @@ from citegeist.expand import ExpansionResult
 
 
 class FakeBootstrapper:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
     def bootstrap(self, store, **kwargs):
+        self.calls.append(dict(kwargs))
         if not kwargs.get("preview_only"):
             store.ensure_topic("graph-topic", "Graph Topic", source_type="bootstrap", expansion_phrase="graph topic")
             store.upsert_entry(
@@ -40,7 +44,11 @@ class FakeBootstrapper:
 
 
 class FakeTopicExpander:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
     def expand_topic(self, store, topic_slug, **kwargs):
+        self.calls.append({"topic_slug": topic_slug, **kwargs})
         preview_only = kwargs.get("preview_only", False)
         if not preview_only:
             store.upsert_entry(
@@ -102,18 +110,99 @@ def test_literature_explorer_api_search_and_show_entry():
 def test_literature_explorer_api_bootstrap_returns_topic_payload():
     store = BibliographyStore()
     try:
-        api = LiteratureExplorerApi(store, bootstrapper=FakeBootstrapper())
+        bootstrapper = FakeBootstrapper()
+        api = LiteratureExplorerApi(store, bootstrapper=bootstrapper)
         payload = api.bootstrap(
             topic="graph topic",
             topic_slug="graph-topic",
             topic_name="Graph Topic",
             preview_only=False,
             expand=False,
+            expansion_mode="both",
+            expansion_rounds=3,
+            recent_years=5,
+            target_recent_entries=10,
+            max_expanded_entries=120,
+            max_expand_seconds=18.5,
         )
 
         assert payload["topic"]["slug"] == "graph-topic"
         assert payload["entries"][0]["citation_key"] == "topic2024graph"
         assert payload["results"][0]["citation_key"] == "topic2024graph"
+        assert bootstrapper.calls[0]["expansion_mode"] == "both"
+        assert bootstrapper.calls[0]["expansion_rounds"] == 3
+        assert bootstrapper.calls[0]["recent_years"] == 5
+        assert bootstrapper.calls[0]["target_recent_entries"] == 10
+        assert bootstrapper.calls[0]["max_expanded_entries"] == 120
+        assert bootstrapper.calls[0]["max_expand_seconds"] == 18.5
+    finally:
+        store.close()
+
+
+def test_literature_explorer_api_exports_topic_bibtex():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Graph Seed},
+  year = {2024}
+}
+"""
+        )
+        store.add_entry_topic("seed2024", topic_slug="graph-topic", topic_name="Graph Topic", source_label="seed")
+        api = LiteratureExplorerApi(store)
+
+        payload = api.export_topic_bibtex("graph-topic")
+
+        assert payload is not None
+        assert payload["topic"]["slug"] == "graph-topic"
+        assert payload["entry_count"] == 1
+        assert "@article{seed2024," in payload["bibtex"]
+    finally:
+        store.close()
+
+
+def test_literature_explorer_api_topic_export_skips_malformed_creator_entries():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{good2024,
+  author = {Seed, Alice},
+  title = {Usable Entry},
+  year = {2024}
+}
+
+@article{bad2024,
+  author = {Normal, Person},
+  title = {Broken Entry},
+  year = {2024}
+}
+"""
+        )
+        store.add_entry_topic("good2024", topic_slug="graph-topic", topic_name="Graph Topic", source_label="seed")
+        store.add_entry_topic("bad2024", topic_slug="graph-topic", topic_name="Graph Topic", source_label="seed")
+        store.connection.execute(
+            """
+            UPDATE creators
+            SET full_name = 'Franck, Jean-Louis, Georges, MALIGE'
+            WHERE full_name = 'Normal, Person'
+            """
+        )
+        store.connection.commit()
+        api = LiteratureExplorerApi(store)
+
+        payload = api.export_topic_bibtex("graph-topic")
+
+        assert payload is not None
+        assert payload["entry_count"] == 2
+        assert payload["exported_count"] == 1
+        assert "@article{good2024," in payload["bibtex"]
+        assert "@article{bad2024," not in payload["bibtex"]
+        assert payload["skipped"][0]["citation_key"] == "bad2024"
+        assert "Too many commas" in payload["skipped"][0]["error"]
     finally:
         store.close()
 
@@ -131,13 +220,25 @@ def test_literature_explorer_api_expand_topic_returns_updated_entries():
 """
         )
         store.add_entry_topic("seed2024", topic_slug="graph-topic", topic_name="Graph Topic", source_label="seed")
-        api = LiteratureExplorerApi(store, topic_expander=FakeTopicExpander())
+        topic_expander = FakeTopicExpander()
+        api = LiteratureExplorerApi(store, topic_expander=topic_expander)
 
-        payload = api.expand_topic("graph-topic", preview_only=False)
+        payload = api.expand_topic(
+            "graph-topic",
+            preview_only=False,
+            relation_type="both",
+            max_rounds=3,
+            recent_years=5,
+            target_recent_entries=10,
+        )
 
         assert payload is not None
         assert payload["results"][0]["discovered_citation_key"] == "discovered2025graph"
         assert any(item["citation_key"] == "discovered2025graph" for item in payload["entries"])
+        assert topic_expander.calls[0]["relation_type"] == "both"
+        assert topic_expander.calls[0]["max_rounds"] == 3
+        assert topic_expander.calls[0]["recent_years"] == 5
+        assert topic_expander.calls[0]["target_recent_entries"] == 10
     finally:
         store.close()
 

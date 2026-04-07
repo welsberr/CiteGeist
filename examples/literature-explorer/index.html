@@ -52,6 +52,8 @@
       position: sticky;
       top: 1rem;
       align-self: start;
+      max-height: calc(100vh - 2rem);
+      overflow-y: auto;
     }
 
     .content {
@@ -190,6 +192,8 @@
 
     .status.error { color: var(--danger); }
     .status.ok { color: var(--accent-2); }
+
+    .status.note { color: #5d4716; }
 
     .meta-grid {
       display: grid;
@@ -382,6 +386,61 @@
       margin-top: 0.75rem;
     }
 
+    .api-reference {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .summary-box {
+      margin-top: 0.75rem;
+      padding: 0.8rem 0.9rem;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.74);
+      border: 1px solid rgba(73, 57, 35, 0.11);
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .summary-box strong {
+      color: var(--ink);
+    }
+
+    .endpoint-card {
+      border-radius: 18px;
+      border: 1px solid rgba(73, 57, 35, 0.11);
+      background: rgba(255, 255, 255, 0.74);
+      padding: 0.95rem 1rem;
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .endpoint-head {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .endpoint-method {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 4.4rem;
+      padding: 0.28rem 0.55rem;
+      border-radius: 999px;
+      background: var(--accent-2);
+      color: #f7fbfb;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .endpoint-path {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 0.9rem;
+      color: var(--ink);
+    }
+
     @media (max-width: 1080px) {
       .shell { grid-template-columns: 1fr; }
       .sidebar { position: static; }
@@ -403,11 +462,16 @@
           <h2>Bridge</h2>
           <label>
             Server URL
-            <input id="server-url" value="http://127.0.0.1:8765" />
+            <input id="server-url" value="" />
+          </label>
+          <label>
+            API Token
+            <input id="api-token" type="password" value="" placeholder="Bearer token for /api access" />
           </label>
           <div class="toolbar">
             <button id="connect-button" class="primary">Connect</button>
             <button id="refresh-topics-button" class="tertiary">Refresh Topics</button>
+            <button id="api-reference-button" class="secondary">API Reference</button>
           </div>
           <div id="connect-status" class="status">Not connected.</div>
         </section>
@@ -442,9 +506,46 @@
               <input id="bootstrap-status" value="draft" />
             </label>
           </div>
+          <div class="row-3">
+            <label>
+              Expansion Mode
+              <select id="bootstrap-expansion-mode">
+                <option value="legacy">legacy</option>
+                <option value="cites">cites</option>
+                <option value="cited_by">cited_by</option>
+                <option value="both">both</option>
+              </select>
+            </label>
+            <label>
+              Rounds
+              <input id="bootstrap-expansion-rounds" type="number" min="1" value="3" />
+            </label>
+            <label>
+              Recent Years
+              <input id="bootstrap-recent-years" type="number" min="0" value="5" />
+            </label>
+          </div>
+          <div class="row-3">
+            <label>
+              Recent Target
+              <input id="bootstrap-target-recent" type="number" min="1" value="5" />
+            </label>
+            <label>
+              Max Expanded Entries
+              <input id="bootstrap-max-expanded-entries" type="number" min="1" value="100" />
+            </label>
+            <label>
+              Max Expand Seconds
+              <input id="bootstrap-max-expand-seconds" type="number" min="1" step="0.5" value="20" />
+            </label>
+          </div>
           <div class="toolbar">
             <button id="bootstrap-preview-button" class="secondary">Preview Bootstrap</button>
             <button id="bootstrap-commit-button" class="primary">Commit Bootstrap</button>
+          </div>
+          <div id="bootstrap-summary" class="summary-box">
+            <strong>Bootstrap Policy</strong>
+            <p>Use graph-limited bootstrap when you want topic seeding and expansion in one pass. The same expansion policy applies to preview and commit.</p>
           </div>
         </section>
 
@@ -471,6 +572,7 @@
               <select id="expand-relation">
                 <option value="cites">cites</option>
                 <option value="cited_by">cited_by</option>
+                <option value="both">both</option>
               </select>
             </label>
             <label>
@@ -488,9 +590,27 @@
               <input id="expand-per-seed-limit" type="number" min="1" value="12" />
             </label>
           </div>
+          <div class="row-3">
+            <label>
+              Rounds
+              <input id="expand-rounds" type="number" min="1" value="3" />
+            </label>
+            <label>
+              Recent Years
+              <input id="expand-recent-years" type="number" min="0" value="5" />
+            </label>
+            <label>
+              Recent Target
+              <input id="expand-target-recent" type="number" min="1" value="10" />
+            </label>
+          </div>
           <div class="toolbar">
             <button id="expand-preview-button" class="secondary">Preview Expansion</button>
             <button id="expand-commit-button" class="primary">Apply Expansion</button>
+          </div>
+          <div id="expand-summary" class="summary-box">
+            <strong>Expansion Policy</strong>
+            <p>Use <code>cites</code> to bias toward newer work, or <code>both</code> for broader graph growth. Recursive rounds stop once the recent-entry target is met.</p>
           </div>
         </section>
 
@@ -579,14 +699,83 @@
         <h2>Graph View</h2>
         <div id="graph-output" class="empty">Load a topic to view a small local network around its first few entries.</div>
       </section>
+
+      <section id="api-reference" class="panel card">
+        <h2>API Reference</h2>
+        <div class="api-reference">
+          <div class="endpoint-card">
+            <div class="endpoint-head">
+              <span class="endpoint-method">GET</span>
+              <span class="endpoint-path">/api/healthz</span>
+            </div>
+            <p>Health check endpoint. Does not require a bearer token.</p>
+          </div>
+          <div class="endpoint-card">
+            <div class="endpoint-head">
+              <span class="endpoint-method">GET</span>
+              <span class="endpoint-path">/api/capabilities</span>
+            </div>
+            <p>Returns the available operation names and preview-capable actions. Requires <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+          </div>
+          <div class="endpoint-card">
+            <div class="endpoint-head">
+              <span class="endpoint-method">POST</span>
+              <span class="endpoint-path">/api/call</span>
+            </div>
+            <p>RPC-style API entry point for search, topic loading, graph traversal, extraction, verification, and topic BibTeX export.</p>
+            <div class="code-block">{
+  "method": "expand_topic",
+  "params": {
+    "topic_slug": "acraniates",
+    "relation_type": "cites",
+    "max_rounds": 3,
+    "recent_years": 5,
+    "target_recent_entries": 10
+  }
+}</div>
+          </div>
+          <div class="endpoint-card">
+            <div class="endpoint-head">
+              <span class="endpoint-method">POST</span>
+              <span class="endpoint-path">/api/call bootstrap policy</span>
+            </div>
+            <p>Bootstrap also accepts expansion policy controls when you want bounded topic seeding plus graph growth in one step.</p>
+            <div class="code-block">{
+  "method": "bootstrap",
+  "params": {
+    "topic": "abiogenesis",
+    "topic_slug": "abiogenesis",
+    "expansion_mode": "cites",
+    "expansion_rounds": 3,
+    "recent_years": 5,
+    "target_recent_entries": 5,
+    "max_expanded_entries": 100,
+    "max_expand_seconds": 20
+  }
+}</div>
+          </div>
+          <div class="endpoint-card">
+            <div class="endpoint-head">
+              <span class="endpoint-method">AUTH</span>
+              <span class="endpoint-path">Bearer token</span>
+            </div>
+            <p>Set the token in the sidebar once. The demo stores it in localStorage and attaches it to subsequent <code>/api/*</code> requests.</p>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
   <script type="module">
     import { createHttpBridge, createLiteratureExplorerClient } from "./literature-explorer.js";
 
+    const DEFAULT_BRIDGE_URL = window.location.origin.startsWith("http")
+      ? `${window.location.origin}/api`
+      : "http://127.0.0.1:8765";
+
     const state = {
-      bridgeUrl: "http://127.0.0.1:8765",
+      bridgeUrl: localStorage.getItem("citegeist.bridgeUrl") || DEFAULT_BRIDGE_URL,
+      apiToken: localStorage.getItem("citegeist.apiToken") || "",
       client: null,
       topics: [],
       activeTopic: null,
@@ -595,8 +784,10 @@
 
     const els = {
       serverUrl: document.getElementById("server-url"),
+      apiToken: document.getElementById("api-token"),
       connectButton: document.getElementById("connect-button"),
       refreshTopicsButton: document.getElementById("refresh-topics-button"),
+      apiReferenceButton: document.getElementById("api-reference-button"),
       connectStatus: document.getElementById("connect-status"),
       topicsList: document.getElementById("topics-list"),
       topicView: document.getElementById("topic-view"),
@@ -614,8 +805,15 @@
       bootstrapTopicLimit: document.getElementById("bootstrap-topic-limit"),
       bootstrapCommitLimit: document.getElementById("bootstrap-commit-limit"),
       bootstrapStatus: document.getElementById("bootstrap-status"),
+      bootstrapExpansionMode: document.getElementById("bootstrap-expansion-mode"),
+      bootstrapExpansionRounds: document.getElementById("bootstrap-expansion-rounds"),
+      bootstrapRecentYears: document.getElementById("bootstrap-recent-years"),
+      bootstrapTargetRecent: document.getElementById("bootstrap-target-recent"),
+      bootstrapMaxExpandedEntries: document.getElementById("bootstrap-max-expanded-entries"),
+      bootstrapMaxExpandSeconds: document.getElementById("bootstrap-max-expand-seconds"),
       bootstrapPreviewButton: document.getElementById("bootstrap-preview-button"),
       bootstrapCommitButton: document.getElementById("bootstrap-commit-button"),
+      bootstrapSummary: document.getElementById("bootstrap-summary"),
       expandTopicSlug: document.getElementById("expand-topic-slug"),
       expandTopicPhrase: document.getElementById("expand-topic-phrase"),
       expandSource: document.getElementById("expand-source"),
@@ -623,8 +821,12 @@
       expandMinRelevance: document.getElementById("expand-min-relevance"),
       expandSeedLimit: document.getElementById("expand-seed-limit"),
       expandPerSeedLimit: document.getElementById("expand-per-seed-limit"),
+      expandRounds: document.getElementById("expand-rounds"),
+      expandRecentYears: document.getElementById("expand-recent-years"),
+      expandTargetRecent: document.getElementById("expand-target-recent"),
       expandPreviewButton: document.getElementById("expand-preview-button"),
       expandCommitButton: document.getElementById("expand-commit-button"),
+      expandSummary: document.getElementById("expand-summary"),
       searchQuery: document.getElementById("search-query"),
       searchTopic: document.getElementById("search-topic"),
       searchButton: document.getElementById("search-button"),
@@ -632,6 +834,9 @@
       extractButton: document.getElementById("extract-button"),
       verifyButton: document.getElementById("verify-button"),
     };
+
+    els.serverUrl.value = state.bridgeUrl;
+    els.apiToken.value = state.apiToken;
 
     function setStatus(text, kind = "") {
       els.connectStatus.textContent = text;
@@ -706,6 +911,9 @@
             ${topic.expansion_phrase ? `<span class="pill">${escapeHtml(topic.expansion_phrase)}</span>` : ""}
             ${topic.source_url ? `<span class="pill">${escapeHtml(topic.source_url)}</span>` : ""}
           </div>
+          <div class="toolbar">
+            <button type="button" class="secondary" data-export-topic="${escapeHtml(topic.slug)}">Export Topic BibTeX</button>
+          </div>
         </div>
         ${entries.map((entry) => `
           <div class="list-item">
@@ -722,6 +930,11 @@
         node.addEventListener("click", async (event) => {
           event.preventDefault();
           await loadEntry(node.getAttribute("data-entry-key"));
+        });
+      });
+      els.topicView.querySelectorAll("[data-export-topic]").forEach((node) => {
+        node.addEventListener("click", async () => {
+          await exportTopicBibtex(node.getAttribute("data-export-topic"));
         });
       });
     }
@@ -842,11 +1055,40 @@
       els.extractVerifyOutput.textContent = JSON.stringify(payload, null, 2);
     }
 
+    function renderExpandSummary(payload) {
+      if (!els.expandSummary) return;
+      const results = payload?.results || [];
+      const assigned = results.filter((item) => item.assigned_to_topic).length;
+      const runMeta = payload?.run_meta || {};
+      els.expandSummary.innerHTML = `
+        <strong>Expansion Summary</strong>
+        <p>${results.length} discoveries returned · ${assigned} assigned to topic · relation ${escapeHtml(els.expandRelation.value)} · rounds ${escapeHtml(els.expandRounds.value)}</p>
+        <p>Recent target: ${escapeHtml(els.expandTargetRecent.value)} within ${escapeHtml(els.expandRecentYears.value)} years. Stop reason: <strong>${escapeHtml(runMeta.stop_reason || "unknown")}</strong>.</p>
+        <p>Recent hits: ${escapeHtml(runMeta.recent_hits ?? 0)} · recent topic hits: ${escapeHtml(runMeta.recent_topic_hits ?? 0)}.</p>
+      `;
+    }
+
+    function renderBootstrapSummary(payload) {
+      if (!els.bootstrapSummary) return;
+      const results = payload?.results || [];
+      const created = results.filter((item) => item.created).length;
+      const runMeta = payload?.run_meta || {};
+      els.bootstrapSummary.innerHTML = `
+        <strong>Bootstrap Summary</strong>
+        <p>${results.length} candidate entries returned · ${created} newly created in this pass · mode ${escapeHtml(els.bootstrapExpansionMode.value)} · rounds ${escapeHtml(els.bootstrapExpansionRounds.value)}</p>
+        <p>Recent target: ${escapeHtml(els.bootstrapTargetRecent.value)} within ${escapeHtml(els.bootstrapRecentYears.value)} years · caps ${escapeHtml(els.bootstrapMaxExpandedEntries.value)} entries / ${escapeHtml(els.bootstrapMaxExpandSeconds.value)} seconds.</p>
+        <p>Stop reason: <strong>${escapeHtml(runMeta.stop_reason || "unknown")}</strong> · expanded discoveries: ${escapeHtml(runMeta.expanded_discoveries ?? 0)} · recent topic hits: ${escapeHtml(runMeta.recent_topic_hits ?? 0)}.</p>
+      `;
+    }
+
     async function connect() {
       setBusy(els.connectButton, true);
       try {
         state.bridgeUrl = els.serverUrl.value.trim() || state.bridgeUrl;
-        const bridge = createHttpBridge(state.bridgeUrl);
+        state.apiToken = els.apiToken.value.trim();
+        localStorage.setItem("citegeist.bridgeUrl", state.bridgeUrl);
+        localStorage.setItem("citegeist.apiToken", state.apiToken);
+        const bridge = createHttpBridge(state.bridgeUrl, { token: state.apiToken });
         const client = createLiteratureExplorerClient(bridge);
         const capabilities = await client.capabilities();
         state.client = client;
@@ -919,10 +1161,17 @@
           topic_limit: Number(els.bootstrapTopicLimit.value || 5),
           topic_commit_limit: Number(els.bootstrapCommitLimit.value || 0) || null,
           preview_only: previewOnly,
-          expand: false,
+          expand: els.bootstrapExpansionMode.value !== "legacy",
           review_status: els.bootstrapStatus.value.trim() || "draft",
+          expansion_mode: els.bootstrapExpansionMode.value,
+          expansion_rounds: Number(els.bootstrapExpansionRounds.value || 1),
+          recent_years: Number(els.bootstrapRecentYears.value || 0) || null,
+          target_recent_entries: Number(els.bootstrapTargetRecent.value || 0) || null,
+          max_expanded_entries: Number(els.bootstrapMaxExpandedEntries.value || 0) || null,
+          max_expand_seconds: Number(els.bootstrapMaxExpandSeconds.value || 0) || null,
         });
         renderExtractVerify(payload);
+        renderBootstrapSummary(payload);
         setLastOp(previewOnly ? "bootstrap_preview" : "bootstrap_commit");
         logActivity(previewOnly ? "bootstrap_preview" : "bootstrap_commit", payload);
         if (!previewOnly) {
@@ -954,9 +1203,13 @@
           min_relevance: Number(els.expandMinRelevance.value || 0.2),
           seed_limit: Number(els.expandSeedLimit.value || 10),
           per_seed_limit: Number(els.expandPerSeedLimit.value || 12),
+          max_rounds: Number(els.expandRounds.value || 1),
+          recent_years: Number(els.expandRecentYears.value || 0),
+          target_recent_entries: Number(els.expandTargetRecent.value || 0) || null,
           preview_only: previewOnly,
         });
         renderExtractVerify(payload);
+        renderExpandSummary(payload);
         setLastOp(previewOnly ? "expand_preview" : "expand_commit");
         logActivity(previewOnly ? "expand_preview" : "expand_commit", payload);
         if (!previewOnly && topicSlug) {
@@ -1027,6 +1280,29 @@
       }
     }
 
+    async function exportTopicBibtex(topicSlug) {
+      if (!state.client || !topicSlug) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      try {
+        const payload = await state.client.exportTopicBibtex(topicSlug, { include_stubs: false });
+        const filename = `${topicSlug}.bib`;
+        downloadText(filename, payload?.bibtex || "");
+        renderExtractVerify(payload);
+        setLastOp("export_topic_bibtex");
+        logActivity(`export_topic_bibtex:${topicSlug}`, payload);
+        const skippedCount = Array.isArray(payload?.skipped) ? payload.skipped.length : 0;
+        if (skippedCount) {
+          setStatus(`Exported ${filename} with ${skippedCount} skipped malformed entr${skippedCount === 1 ? "y" : "ies"}.`, "ok");
+        } else {
+          setStatus(`Exported ${filename}`, "ok");
+        }
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      }
+    }
+
     function escapeHtml(value) {
       return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -1068,8 +1344,23 @@
       });
     }
 
+    function downloadText(filename, text) {
+      const blob = new Blob([text], { type: "application/x-bibtex; charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+
     els.connectButton.addEventListener("click", connect);
     els.refreshTopicsButton.addEventListener("click", refreshTopics);
+    els.apiReferenceButton.addEventListener("click", () => {
+      document.getElementById("api-reference").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
     els.bootstrapPreviewButton.addEventListener("click", () => runBootstrap(true));
     els.bootstrapCommitButton.addEventListener("click", () => runBootstrap(false));
     els.expandPreviewButton.addEventListener("click", () => runExpand(true));
