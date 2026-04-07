@@ -247,6 +247,203 @@ def test_cli_verify_bib_outputs_json(tmp_path: Path):
     assert payload[0]["entry"]["citation_key"] == "candidate2024"
 
 
+def test_cli_sync_jabref_ingests_resolves_and_exports(tmp_path: Path):
+    bib_path = tmp_path / "jabref-library.bib"
+    bib_path.write_text(
+        """
+@article{smith2024graphs,
+  author = {Smith, Jane},
+  title = {Graph-first bibliography augmentation},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "jabref-library.enriched.bib"
+
+    class FakeStore:
+        def __init__(self) -> None:
+            self.ingest_calls: list[tuple[str, str, str]] = []
+            self.closed = False
+
+        def ingest_bibtex(self, text: str, source_label: str, review_status: str) -> list[str]:
+            self.ingest_calls.append((text, source_label, review_status))
+            return ["smith2024graphs"]
+
+        def get_bib_entry(self, citation_key: str):
+            from citegeist.bibtex import BibEntry
+
+            return BibEntry("article", citation_key, {"title": "Resolved Work"})
+
+        def get_entry(self, citation_key: str):
+            return {"citation_key": citation_key, "review_status": "enriched"}
+
+        def get_field_conflicts(self, citation_key: str, status: str | None = None):
+            return []
+
+        def get_field_provenance(self, citation_key: str):
+            return []
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_store = FakeStore()
+    resolve_calls: list[str] = []
+
+    stdout_buffer = io.StringIO()
+    with (
+        patch("citegeist.cli.BibliographyStore", return_value=fake_store),
+        patch("citegeist.cli.MetadataResolver"),
+        patch("citegeist.cli.render_bibtex", return_value="@article{smith2024graphs,\n  title = {Resolved Work}\n}"),
+        patch(
+            "citegeist.cli._resolve_one",
+            side_effect=lambda store, resolver, citation_key: resolve_calls.append(citation_key) or True,
+        ),
+        redirect_stdout(stdout_buffer),
+    ):
+        exit_code = main(
+            [
+                "--db",
+                str(tmp_path / "library.sqlite3"),
+                "sync-jabref",
+                str(bib_path),
+                "--output",
+                str(output_path),
+                "--status",
+                "draft",
+                "--source-label",
+                "jabref:test",
+            ]
+        )
+
+    assert exit_code == 0
+    assert fake_store.ingest_calls[0][1:] == ("jabref:test", "draft")
+    assert resolve_calls == ["smith2024graphs"]
+    assert "@article{smith2024graphs," in output_path.read_text(encoding="utf-8")
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload["imported_count"] == 1
+    assert payload["resolved_count"] == 1
+    assert payload["failed_resolve_count"] == 0
+    assert payload["skipped_resolution"] is False
+
+
+def test_cli_sync_jabref_can_skip_resolution(tmp_path: Path):
+    bib_path = tmp_path / "jabref-library.bib"
+    bib_path.write_text("@article{seed2024, title = {Seed}}\n", encoding="utf-8")
+    output_path = tmp_path / "jabref-library.enriched.bib"
+
+    class FakeStore:
+        def ingest_bibtex(self, text: str, source_label: str, review_status: str) -> list[str]:
+            return ["seed2024"]
+
+        def get_bib_entry(self, citation_key: str):
+            from citegeist.bibtex import BibEntry
+
+            return BibEntry("article", citation_key, {"title": "Seed"})
+
+        def get_entry(self, citation_key: str):
+            return {"citation_key": citation_key, "review_status": "draft"}
+
+        def get_field_conflicts(self, citation_key: str, status: str | None = None):
+            return []
+
+        def get_field_provenance(self, citation_key: str):
+            return []
+
+        def close(self) -> None:
+            return None
+
+    stdout_buffer = io.StringIO()
+    with (
+        patch("citegeist.cli.BibliographyStore", return_value=FakeStore()),
+        patch("citegeist.cli.render_bibtex", return_value="@article{seed2024,\n  title = {Seed}\n}"),
+        patch("citegeist.cli._resolve_one") as mocked_resolve,
+        redirect_stdout(stdout_buffer),
+    ):
+        exit_code = main(
+            [
+                "--db",
+                str(tmp_path / "library.sqlite3"),
+                "sync-jabref",
+                str(bib_path),
+                "--output",
+                str(output_path),
+                "--no-resolve",
+            ]
+        )
+
+    assert exit_code == 0
+    mocked_resolve.assert_not_called()
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload["skipped_resolution"] is True
+    assert payload["resolved_count"] == 0
+
+
+def test_cli_sync_jabref_can_annotate_review_fields_and_write_in_place(tmp_path: Path):
+    bib_path = tmp_path / "jabref-library.bib"
+    bib_path.write_text("@article{seed2024, title = {Seed}}\n", encoding="utf-8")
+
+    class FakeStore:
+        def ingest_bibtex(self, text: str, source_label: str, review_status: str) -> list[str]:
+            return ["seed2024"]
+
+        def get_bib_entry(self, citation_key: str):
+            from citegeist.bibtex import BibEntry
+
+            return BibEntry("article", citation_key, {"title": "Seed"})
+
+        def get_entry(self, citation_key: str):
+            return {"citation_key": citation_key, "review_status": "enriched"}
+
+        def get_field_conflicts(self, citation_key: str, status: str | None = None):
+            return [{"field_name": "title"}]
+
+        def get_field_provenance(self, citation_key: str):
+            return [{"source_label": "pubmed:pmid:12345678"}]
+
+        def close(self) -> None:
+            return None
+
+    stdout_buffer = io.StringIO()
+    with (
+        patch("citegeist.cli.BibliographyStore", return_value=FakeStore()),
+        patch(
+            "citegeist.cli.render_bibtex",
+            side_effect=lambda entries: "\n".join(
+                [
+                    "@article{seed2024,",
+                    f"  title = {{{entries[0].fields['title']}}},",
+                    f"  x_citegeist_review_status = {{{entries[0].fields.get('x_citegeist_review_status', '')}}},",
+                    f"  x_citegeist_open_conflicts = {{{entries[0].fields.get('x_citegeist_open_conflicts', '')}}},",
+                    f"  x_citegeist_last_source = {{{entries[0].fields.get('x_citegeist_last_source', '')}}}",
+                    "}",
+                ]
+            ),
+        ),
+        patch("citegeist.cli._resolve_one", return_value=True),
+        redirect_stdout(stdout_buffer),
+    ):
+        exit_code = main(
+            [
+                "--db",
+                str(tmp_path / "library.sqlite3"),
+                "sync-jabref",
+                str(bib_path),
+                "--in-place",
+                "--annotate-review",
+            ]
+        )
+
+    assert exit_code == 0
+    rendered = bib_path.read_text(encoding="utf-8")
+    assert "x_citegeist_review_status" in rendered
+    assert "x_citegeist_open_conflicts" in rendered
+    assert "x_citegeist_last_source" in rendered
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload["in_place"] is True
+    assert payload["annotated_review"] is True
+
+
 def test_cli_resolve_updates_entry(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(

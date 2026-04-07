@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .batch import BatchBootstrapRunner, load_batch_jobs
-from .bibtex import parse_bibtex, render_bibtex
+from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
@@ -54,6 +54,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-stubs",
         action="store_true",
         help="Include DOI-only placeholder records in broad exports",
+    )
+
+    sync_jabref_parser = subparsers.add_parser(
+        "sync-jabref",
+        help="Round-trip a JabRef-managed BibTeX file through CiteGeist ingest, enrichment, and export",
+    )
+    sync_jabref_parser.add_argument("input", help="BibTeX file managed in JabRef")
+    sync_jabref_parser.add_argument("--output", help="Path to write the enriched BibTeX export")
+    sync_jabref_parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="Write the enriched BibTeX back to the input file instead of a separate output path",
+    )
+    sync_jabref_parser.add_argument("--status", default="draft", help="Initial review status for newly ingested entries")
+    sync_jabref_parser.add_argument("--source-label", help="Provenance label for the ingest step")
+    sync_jabref_parser.add_argument(
+        "--no-resolve",
+        action="store_true",
+        help="Skip metadata resolution after ingest and only re-export the imported entries",
+    )
+    sync_jabref_parser.add_argument(
+        "--annotate-review",
+        action="store_true",
+        help="Add CiteGeist review/status sidecar fields to the exported BibTeX for easier JabRef review",
     )
 
     status_parser = subparsers.add_parser("set-status", help="Set the review status for one entry")
@@ -662,6 +686,17 @@ def main(argv: list[str] | None = None) -> int:
             return _run_show(store, args.citation_key, args.limit, args.provenance, args.conflicts)
         if args.command == "export":
             return _run_export(store, args.citation_keys, args.output, args.include_stubs)
+        if args.command == "sync-jabref":
+            return _run_sync_jabref(
+                store,
+                Path(args.input),
+                Path(args.output) if args.output else None,
+                args.in_place,
+                args.status,
+                args.source_label,
+                args.no_resolve,
+                args.annotate_review,
+            )
         if args.command == "set-status":
             return _run_set_status(store, args.citation_key, args.review_status)
         if args.command == "resolve-conflicts":
@@ -905,6 +940,103 @@ def _run_export(
         if rendered:
             print(rendered)
     return 0
+
+
+def _run_sync_jabref(
+    store: BibliographyStore,
+    input_path: Path,
+    output_path: Path | None,
+    in_place: bool,
+    review_status: str,
+    source_label: str | None,
+    skip_resolve: bool,
+    annotate_review: bool,
+) -> int:
+    if in_place:
+        effective_output_path = input_path
+    elif output_path is not None:
+        effective_output_path = output_path
+    else:
+        print("sync-jabref requires --output or --in-place", file=sys.stderr)
+        return 1
+
+    text = input_path.read_text(encoding="utf-8")
+    imported_keys = store.ingest_bibtex(
+        text,
+        source_label=source_label or str(input_path),
+        review_status=review_status,
+    )
+
+    resolved_keys: list[str] = []
+    failed_keys: list[str] = []
+    if not skip_resolve:
+        resolver = MetadataResolver()
+        total = len(imported_keys)
+        for index, citation_key in enumerate(imported_keys, start=1):
+            _print_progress("sync-jabref resolving", index, total, citation_key)
+            if _resolve_one(store, resolver, citation_key):
+                resolved_keys.append(citation_key)
+            else:
+                failed_keys.append(citation_key)
+
+    rendered = _render_jabref_sync_export(store, imported_keys, annotate_review=annotate_review)
+    effective_output_path.write_text(rendered + ("\n" if rendered else ""), encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "input": str(input_path),
+                "output": str(effective_output_path),
+                "imported_count": len(imported_keys),
+                "resolved_count": len(resolved_keys),
+                "failed_resolve_count": len(failed_keys),
+                "skipped_resolution": skip_resolve,
+                "annotated_review": annotate_review,
+                "in_place": in_place,
+                "citation_keys": imported_keys,
+            },
+            indent=2,
+        )
+    )
+    return 0 if skip_resolve or not failed_keys else 1
+
+
+def _render_jabref_sync_export(
+    store: BibliographyStore,
+    citation_keys: list[str],
+    *,
+    annotate_review: bool,
+) -> str:
+    entries: list[BibEntry] = []
+    for citation_key in citation_keys:
+        entry = store.get_bib_entry(citation_key)
+        if entry is None:
+            continue
+        if annotate_review:
+            entry = _annotated_jabref_entry(store, entry)
+        entries.append(entry)
+    return render_bibtex(entries) if entries else ""
+
+
+def _annotated_jabref_entry(store: BibliographyStore, entry: BibEntry) -> BibEntry:
+    row = store.get_entry(entry.citation_key) or {}
+    annotated = BibEntry(
+        entry_type=entry.entry_type,
+        citation_key=entry.citation_key,
+        fields=dict(entry.fields),
+    )
+    review_status = str(row.get("review_status") or "")
+    if review_status:
+        annotated.fields["x_citegeist_review_status"] = review_status
+    open_conflicts = store.get_field_conflicts(entry.citation_key, status="open")
+    if open_conflicts:
+        annotated.fields["x_citegeist_open_conflicts"] = str(len(open_conflicts))
+        annotated.fields["x_citegeist_conflict_fields"] = ", ".join(
+            sorted({str(conflict.get("field_name") or "") for conflict in open_conflicts if conflict.get("field_name")})
+        )
+    provenance = store.get_field_provenance(entry.citation_key)
+    if provenance:
+        annotated.fields["x_citegeist_last_source"] = str(provenance[-1].get("source_label") or "")
+    return annotated
 
 
 def _run_set_status(store: BibliographyStore, citation_key: str, review_status: str) -> int:

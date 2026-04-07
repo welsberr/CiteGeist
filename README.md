@@ -176,6 +176,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist verify --bib draft.bib --output ver
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 sync-jabref my-library.bib --output my-library.enriched.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topics
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topic-entries abiogenesis
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic abiogenesis --output abiogenesis.bib
@@ -207,6 +208,22 @@ Crossref reference expansion is intentionally conservative about weak discoverie
 OpenAlex expansion is also conservative about noisy secondary records. Discoveries now prefer DOI-based citation keys when a DOI is present, which reduces parallel `doi...` and `openalex...` entries for the same work. OpenAlex abstract imports are sanitized to drop obvious webpage/export blobs, and DOI-less records are filtered when they look like venue-title stubs, generic container records, or weak review-like shadows of an already present book, chapter, proceedings paper, or dissertation with the same title. Both OpenAlex and Crossref discovery paths also normalize some malformed author strings from upstream metadata, including inverted-initial patterns such as `J., Fogel L.`, into stable BibTeX names like `Fogel, L. J.`. Preview mode uses the same admission rules as write-enabled expansion, so rejected candidates disappear before you commit them to the store.
 
 For live-source development, prefer fixture-backed or cache-backed source clients so resolver and expansion work can be exercised repeatedly without re-hitting upstream APIs on every run.
+
+## JabRef Workflow
+
+`citegeist` is not a replacement for JabRef's day-to-day BibTeX editing UX. The intended near-term integration model is file-based round-tripping:
+
+- use JabRef to inspect, edit, and review your main `.bib` library;
+- use `citegeist sync-jabref` to ingest that file into CiteGeist, run metadata enrichment against imported entries, and write an enriched `.bib` export back out;
+- reopen the enriched file in JabRef for human review and curation.
+
+That keeps JabRef as the primary manual review surface while letting CiteGeist handle source-backed resolution and discovery work that reference managers usually do not automate well.
+
+Useful options for that round trip:
+
+- `--in-place`: overwrite the input `.bib` file instead of writing to a separate export path
+- `--annotate-review`: add `x_citegeist_*` sidecar fields such as review status, open-conflict count, and last source label so JabRef can surface CiteGeist review cues directly in the BibTeX record
+- `--no-resolve`: skip live metadata resolution and only perform import plus re-export
 
 ## Adopted Ideas From Earlier Repos
 

@@ -315,6 +315,26 @@ Limit discoveries per seed:
 .venv/bin/python -m citegeist --db library.sqlite3 expand langton1989artificial1 --source openalex --limit 10
 ```
 
+### JabRef Round Trip
+
+Use JabRef as the main editor and CiteGeist as the enrichment pass:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 sync-jabref my-library.bib --output my-library.enriched.bib
+```
+
+Skip resolver calls if you only want a normalized import/export pass:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 sync-jabref my-library.bib --output my-library.enriched.bib --no-resolve
+```
+
+Write back to the same file and include CiteGeist review cues as BibTeX sidecar fields for JabRef:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 sync-jabref my-library.bib --in-place --annotate-review
+```
+
 ## Build A Topic-Centered Bibliography
 
 Purpose: create, expand, inspect, and export a topic slice such as `artificial life`.

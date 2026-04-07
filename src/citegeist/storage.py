@@ -1048,6 +1048,9 @@ class BibliographyStore:
             return None
         return render_bibtex([entry])
 
+    def get_bib_entry(self, citation_key: str) -> BibEntry | None:
+        return self._load_bib_entry(citation_key)
+
     def export_bibtex(self, citation_keys: list[str] | None = None, include_stubs: bool | None = None) -> str:
         return self.export_bibtex_report(citation_keys, include_stubs=include_stubs)["bibtex"]
 
