@@ -36,6 +36,11 @@ class MetadataResolver:
             if resolved is not None:
                 return resolved
 
+        if pmid := entry.fields.get("pmid"):
+            resolved = self.resolve_pmid(pmid)
+            if resolved is not None:
+                return resolved
+
         if openalex_id := entry.fields.get("openalex"):
             resolved = self.resolve_openalex(openalex_id)
             if resolved is not None:
@@ -67,6 +72,13 @@ class MetadataResolver:
             if resolved is not None:
                 return resolved
             resolved = self.search_openalex_best_match(
+                title=title,
+                author_text=entry.fields.get("author", ""),
+                year=entry.fields.get("year", ""),
+            )
+            if resolved is not None:
+                return resolved
+            resolved = self.search_pubmed_best_match(
                 title=title,
                 author_text=entry.fields.get("author", ""),
                 year=entry.fields.get("year", ""),
@@ -166,6 +178,23 @@ class MetadataResolver:
             source_label=f"arxiv:id:{arxiv_id}",
         )
 
+    def resolve_pmid(self, pmid: str) -> Resolution | None:
+        normalized_pmid = _normalize_pmid(pmid)
+        if not normalized_pmid:
+            return None
+        query = urllib.parse.urlencode({"db": "pubmed", "id": normalized_pmid, "retmode": "xml"})
+        root = self._safe_get_xml(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?{query}")
+        if root is None:
+            return None
+        article = _find_pubmed_article(root, normalized_pmid)
+        if article is None:
+            return None
+        return Resolution(
+            entry=_pubmed_article_to_entry(article, fallback_pmid=normalized_pmid),
+            source_type="resolver",
+            source_label=f"pubmed:pmid:{normalized_pmid}",
+        )
+
     def resolve_openalex(self, openalex_id: str) -> Resolution | None:
         normalized_id = _normalize_openalex_id(openalex_id)
         payload = self._safe_get_json(f"https://api.openalex.org/works/{normalized_id}")
@@ -227,6 +256,30 @@ class MetadataResolver:
             return []
         return [_openalex_work_to_entry(item) for item in payload.get("results", [])]
 
+    def search_pubmed(self, title: str, limit: int = 5) -> list[BibEntry]:
+        query_text = " ".join(title.split())
+        if not query_text:
+            return []
+        query = urllib.parse.urlencode(
+            {
+                "db": "pubmed",
+                "retmode": "json",
+                "retmax": max(1, limit),
+                "term": query_text,
+            }
+        )
+        payload = self._safe_get_json(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{query}")
+        if payload is None:
+            return []
+        ids = [
+            normalized
+            for value in payload.get("esearchresult", {}).get("idlist", [])
+            if (normalized := _normalize_pmid(str(value)))
+        ]
+        if not ids:
+            return []
+        return self._fetch_pubmed_entries(ids[:limit])
+
     def _safe_get_json(self, url: str) -> dict | None:
         try:
             return self.source_client.get_json(url)
@@ -264,6 +317,51 @@ class MetadataResolver:
             source_type="resolver",
             source_label=f"openalex:search:{title}",
         )
+
+    def search_pubmed_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        candidate = _select_best_title_match(
+            self.search_pubmed(title, limit=5),
+            title=title,
+            author_text=author_text,
+            year=year,
+        )
+        if candidate is None:
+            return None
+        return Resolution(
+            entry=candidate,
+            source_type="resolver",
+            source_label=f"pubmed:search:{title}",
+        )
+
+    def _fetch_pubmed_entries(self, pmids: list[str]) -> list[BibEntry]:
+        ordered_pmids = [pmid for pmid in dict.fromkeys(pmids) if pmid]
+        if not ordered_pmids:
+            return []
+
+        id_param = ",".join(ordered_pmids)
+        summary_query = urllib.parse.urlencode({"db": "pubmed", "retmode": "json", "id": id_param})
+        summaries_payload = self._safe_get_json(
+            f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{summary_query}"
+        ) or {}
+        summaries = summaries_payload.get("result", {})
+
+        fetch_query = urllib.parse.urlencode({"db": "pubmed", "id": id_param, "retmode": "xml"})
+        root = self._safe_get_xml(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?{fetch_query}")
+        articles = _pubmed_articles_by_pmid(root)
+
+        entries: list[BibEntry] = []
+        for pmid in ordered_pmids:
+            summary = summaries.get(pmid)
+            article = articles.get(pmid)
+            if not summary and article is None:
+                continue
+            entries.append(_pubmed_record_to_entry(summary or {}, article, fallback_pmid=pmid))
+        return entries
 
 def merge_entries(base: BibEntry, resolved: BibEntry) -> BibEntry:
     merged, _ = merge_entries_with_conflicts(base, resolved)
@@ -649,6 +747,214 @@ def _candidate_matches_author_tokens(candidate: BibEntry, author_tokens: set[str
         return False
     candidate_tokens = set(re.findall(r"[a-z0-9]+", candidate_author))
     return bool(author_tokens & candidate_tokens)
+
+
+def _normalize_pmid(value: str) -> str:
+    return "".join(ch for ch in str(value) if ch.isdigit())
+
+
+def _pubmed_articles_by_pmid(root: ET.Element | None) -> dict[str, ET.Element]:
+    if root is None:
+        return {}
+    articles: dict[str, ET.Element] = {}
+    for article in root.findall(".//PubmedArticle"):
+        pmid = _normalize_pmid(_node_text(article.find("./MedlineCitation/PMID")))
+        if pmid:
+            articles[pmid] = article
+    return articles
+
+
+def _find_pubmed_article(root: ET.Element, pmid: str) -> ET.Element | None:
+    return _pubmed_articles_by_pmid(root).get(_normalize_pmid(pmid))
+
+
+def _pubmed_record_to_entry(summary: dict, article: ET.Element | None, fallback_pmid: str) -> BibEntry:
+    if article is not None:
+        entry = _pubmed_article_to_entry(article, fallback_pmid=fallback_pmid)
+        _merge_pubmed_summary_into_fields(entry.fields, summary, fallback_pmid)
+        return entry
+    fields = _pubmed_summary_fields(summary, fallback_pmid)
+    citation_key = _pubmed_citation_key(
+        fields.get("doi", ""),
+        fields.get("pmid", ""),
+        fields.get("author", ""),
+        fields.get("year", ""),
+        fields.get("title", ""),
+    )
+    return BibEntry(entry_type="article", citation_key=citation_key, fields=fields)
+
+
+def _pubmed_article_to_entry(article: ET.Element, fallback_pmid: str = "") -> BibEntry:
+    medline = article.find("./MedlineCitation")
+    article_node = medline.find("./Article") if medline is not None else None
+    pubmed_data = article.find("./PubmedData")
+    pmid = _normalize_pmid(_node_text(medline.find("./PMID")) if medline is not None else fallback_pmid) or _normalize_pmid(
+        fallback_pmid
+    )
+    title = _normalize_text(_element_text(article_node.find("./ArticleTitle")) if article_node is not None else "")
+    authors = " and ".join(
+        name
+        for name in (_pubmed_author_name(author) for author in article.findall(".//AuthorList/Author"))
+        if name
+    )
+    journal = _normalize_text(_node_text(article.find(".//Journal/Title")))
+    year = _pubmed_article_year(article)
+    abstract = _pubmed_abstract_text(article)
+    doi = _pubmed_article_identifier(article, "doi")
+    pmcid = _pubmed_article_identifier(pubmed_data, "pmc")
+
+    fields: dict[str, str] = {}
+    if title:
+        fields["title"] = title
+    if authors:
+        fields["author"] = authors
+    if year:
+        fields["year"] = year
+    if journal:
+        fields["journal"] = journal
+    if abstract:
+        fields["abstract"] = abstract
+    if doi:
+        fields["doi"] = doi
+    if pmid:
+        fields["pmid"] = pmid
+    if pmcid:
+        fields["pmcid"] = pmcid
+        fields["url"] = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+    elif pmid:
+        fields["url"] = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+
+    citation_key = _pubmed_citation_key(doi, pmid, authors, year, title)
+    return BibEntry(entry_type="article", citation_key=citation_key, fields=fields)
+
+
+def _merge_pubmed_summary_into_fields(fields: dict[str, str], summary: dict, fallback_pmid: str) -> None:
+    for key, value in _pubmed_summary_fields(summary, fallback_pmid).items():
+        if value and not fields.get(key):
+            fields[key] = value
+
+
+def _pubmed_summary_fields(summary: dict, fallback_pmid: str) -> dict[str, str]:
+    pmid = _normalize_pmid(str(summary.get("uid") or fallback_pmid))
+    title = _normalize_text(str(summary.get("title") or ""))
+    year = _pubmed_year_from_text(str(summary.get("pubdate") or ""))
+    journal = _normalize_text(str(summary.get("fulljournalname") or ""))
+    authors = " and ".join(
+        name
+        for name in (
+            _normalize_person_display_name(str(author.get("name") or ""))
+            for author in summary.get("authors", [])
+        )
+        if name
+    )
+    doi = ""
+    pmcid = ""
+    for article_id in summary.get("articleids", []) or []:
+        id_type = str(article_id.get("idtype") or "").lower()
+        value = str(article_id.get("value") or "")
+        if id_type == "doi" and value:
+            doi = value
+        elif id_type in {"pmc", "pmcid"} and value:
+            pmcid = value
+
+    fields: dict[str, str] = {}
+    if title:
+        fields["title"] = title
+    if authors:
+        fields["author"] = authors
+    if year:
+        fields["year"] = year
+    if journal:
+        fields["journal"] = journal
+    if doi:
+        fields["doi"] = doi
+    if pmid:
+        fields["pmid"] = pmid
+    if pmcid:
+        fields["pmcid"] = pmcid
+        fields["url"] = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+    elif pmid:
+        fields["url"] = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+    return fields
+
+
+def _pubmed_author_name(author: ET.Element) -> str:
+    collective = _normalize_text(_node_text(author.find("./CollectiveName")))
+    if collective:
+        return collective
+    family = _normalize_text(_node_text(author.find("./LastName")))
+    given = _normalize_text(_node_text(author.find("./ForeName")))
+    initials = _normalize_text(_node_text(author.find("./Initials")))
+    if family and given:
+        return f"{family}, {given}"
+    if family and initials:
+        normalized_initials = " ".join(f"{letter}." for letter in re.findall(r"[A-Za-z]", initials))
+        return f"{family}, {normalized_initials}" if normalized_initials else family
+    return family or given
+
+
+def _pubmed_article_year(article: ET.Element) -> str:
+    for path in (
+        ".//JournalIssue/PubDate/Year",
+        ".//ArticleDate/Year",
+        ".//PubDate/Year",
+    ):
+        year = _node_text(article.find(path))
+        if year:
+            return year
+    for path in (
+        ".//JournalIssue/PubDate/MedlineDate",
+        ".//PubDate/MedlineDate",
+    ):
+        year = _pubmed_year_from_text(_node_text(article.find(path)))
+        if year:
+            return year
+    return ""
+
+
+def _pubmed_year_from_text(value: str) -> str:
+    match = re.search(r"\b(1[6-9]\d{2}|20\d{2}|21\d{2})\b", value)
+    return match.group(1) if match else ""
+
+
+def _pubmed_abstract_text(article: ET.Element) -> str:
+    parts: list[str] = []
+    for node in article.findall(".//Abstract/AbstractText"):
+        text = _normalize_text(_element_text(node))
+        if not text:
+            continue
+        label = _normalize_text(node.attrib.get("Label", ""))
+        parts.append(f"{label}: {text}" if label else text)
+    return " ".join(parts)
+
+
+def _pubmed_article_identifier(root: ET.Element | None, identifier_type: str) -> str:
+    if root is None:
+        return ""
+    normalized_type = identifier_type.lower()
+    for node in root.findall(".//ArticleId"):
+        if str(node.attrib.get("IdType") or "").lower() == normalized_type:
+            return _normalize_text(_element_text(node))
+    if normalized_type == "doi":
+        for node in root.findall(".//ELocationID"):
+            if str(node.attrib.get("EIdType") or "").lower() == "doi":
+                return _normalize_text(_element_text(node))
+    return ""
+
+
+def _pubmed_citation_key(doi: str, pmid: str, authors: str, year: str, title: str) -> str:
+    if doi:
+        suffix = re.sub(r"[^A-Za-z0-9]+", "", doi).lower()
+        return f"doi{suffix}"
+    if pmid:
+        return f"pmid{pmid}"
+    return _make_resolution_key(authors or "pubmed", year or "n.d.", title or "untitled")
+
+
+def _element_text(node: ET.Element | None) -> str:
+    if node is None:
+        return ""
+    return " ".join("".join(node.itertext()).split())
 
 
 def _datacite_work_to_entry(data: dict) -> BibEntry:

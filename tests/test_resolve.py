@@ -8,6 +8,7 @@ from citegeist.resolve import (
     _crossref_message_to_entry,
     _datacite_work_to_entry,
     _openalex_work_to_entry,
+    _pubmed_article_to_entry,
     merge_entries_with_conflicts,
     merge_entries,
 )
@@ -86,6 +87,52 @@ def test_arxiv_atom_entry_to_bib_maps_basic_fields():
     assert entry.fields["author"] == "Miller, Sam"
     assert entry.fields["arxiv"] == "2301.12345"
     assert entry.fields["doi"] == "10.1000/arxiv-example"
+
+
+def test_pubmed_article_to_entry_maps_basic_fields():
+    xml = ET.fromstring(
+        """
+<PubmedArticle>
+  <MedlineCitation>
+    <PMID>12345678</PMID>
+    <Article>
+      <ArticleTitle>PubMed Resolved Work</ArticleTitle>
+      <Abstract>
+        <AbstractText Label="Background">Evidence summary.</AbstractText>
+        <AbstractText>Second paragraph.</AbstractText>
+      </Abstract>
+      <Journal>
+        <JournalIssue>
+          <PubDate><Year>2021</Year></PubDate>
+        </JournalIssue>
+        <Title>Journal of Evidence</Title>
+      </Journal>
+      <AuthorList>
+        <Author><LastName>Smith</LastName><ForeName>Jane</ForeName></Author>
+      </AuthorList>
+      <ELocationID EIdType="doi">10.1000/pubmed-example</ELocationID>
+    </Article>
+  </MedlineCitation>
+  <PubmedData>
+    <ArticleIdList>
+      <ArticleId IdType="pubmed">12345678</ArticleId>
+      <ArticleId IdType="pmc">PMC123456</ArticleId>
+    </ArticleIdList>
+  </PubmedData>
+</PubmedArticle>
+"""
+    )
+
+    entry = _pubmed_article_to_entry(xml)
+
+    assert entry.citation_key == "doi101000pubmedexample"
+    assert entry.fields["title"] == "PubMed Resolved Work"
+    assert entry.fields["author"] == "Smith, Jane"
+    assert entry.fields["journal"] == "Journal of Evidence"
+    assert entry.fields["year"] == "2021"
+    assert entry.fields["pmid"] == "12345678"
+    assert entry.fields["pmcid"] == "PMC123456"
+    assert entry.fields["abstract"] == "Background: Evidence summary. Second paragraph."
 
 
 def test_merge_entries_prefers_existing_values_and_adds_missing_fields():
@@ -205,6 +252,35 @@ def test_resolver_tries_doi_before_dblp():
     assert calls == [
         ("doi", "10.1000/example-doi"),
         ("datacite", "10.1000/example-doi"),
+        ("dblp", "conf/test/Smith24"),
+    ]
+
+
+def test_resolver_tries_pmid_before_dblp():
+    resolver = MetadataResolver()
+    calls: list[tuple[str, str]] = []
+
+    def fake_pmid(value: str):
+        calls.append(("pmid", value))
+        return None
+
+    def fake_dblp(value: str):
+        calls.append(("dblp", value))
+        return None
+
+    resolver.resolve_pmid = fake_pmid  # type: ignore[method-assign]
+    resolver.resolve_dblp = fake_dblp  # type: ignore[method-assign]
+
+    resolver.resolve_entry(
+        BibEntry(
+            entry_type="article",
+            citation_key="smith2024graphs",
+            fields={"pmid": "12345678", "dblp": "conf/test/Smith24"},
+        )
+    )
+
+    assert calls == [
+        ("pmid", "12345678"),
         ("dblp", "conf/test/Smith24"),
     ]
 

@@ -36,6 +36,37 @@ def test_verifier_uses_direct_doi_resolution_for_bib_entries():
     assert result.source_label == "crossref:doi:10.1000/example"
 
 
+def test_verifier_uses_direct_pmid_resolution_for_bib_entries():
+    verifier = BibliographyVerifier()
+    verifier.resolver.resolve_pmid = lambda value: Resolution(  # type: ignore[method-assign]
+        entry=BibEntry(
+            entry_type="article",
+            citation_key="pmid12345678",
+            fields={
+                "author": "Smith, Jane",
+                "title": "Resolved PubMed Work",
+                "year": "2024",
+                "pmid": value,
+            },
+        ),
+        source_type="resolver",
+        source_label=f"pubmed:pmid:{value}",
+    )
+
+    result = verifier.verify_bib_entry(
+        BibEntry(
+            entry_type="misc",
+            citation_key="seed2024",
+            fields={"title": "Rough Work", "pmid": "12345678"},
+        )
+    )
+
+    assert result.status == "exact"
+    assert result.confidence == 1.0
+    assert result.entry.fields["title"] == "Resolved PubMed Work"
+    assert result.source_label == "pubmed:pmid:12345678"
+
+
 def test_verifier_scores_and_sorts_search_candidates():
     verifier = BibliographyVerifier()
     verifier.resolver.search_crossref = lambda title, limit=5: [  # type: ignore[method-assign]
@@ -61,6 +92,7 @@ def test_verifier_scores_and_sorts_search_candidates():
     ]
     verifier.resolver.search_openalex = lambda title, limit=5: []  # type: ignore[method-assign]
     verifier.resolver.search_datacite = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_pubmed = lambda title, limit=5: []  # type: ignore[method-assign]
 
     result = verifier.verify_string('"Graph-first bibliography augmentation" Smith 2024')
 
@@ -74,6 +106,7 @@ def test_verification_result_to_bib_entry_contains_audit_fields():
     verifier.resolver.search_crossref = lambda title, limit=5: []  # type: ignore[method-assign]
     verifier.resolver.search_openalex = lambda title, limit=5: []  # type: ignore[method-assign]
     verifier.resolver.search_datacite = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_pubmed = lambda title, limit=5: []  # type: ignore[method-assign]
 
     result = verifier._verify_query(  # type: ignore[attr-defined]
         {"title": "Missing Work", "authors": [], "year": "", "venue": ""},

@@ -34,6 +34,7 @@ def test_bootstrap_from_topic_only():
     try:
         bootstrapper = Bootstrapper()
         bootstrapper.resolver.search_openalex = lambda topic, limit=5: []  # type: ignore[method-assign]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: [  # type: ignore[method-assign]
             __import__("citegeist").BibEntry(
@@ -139,6 +140,7 @@ def test_bootstrap_ranks_and_deduplicates_topic_candidates():
                 fields={"title": "Graph Topic Ranking", "abstract": "graph topic graph"},
             )
         ]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: [  # type: ignore[method-assign]
             BibEntry(
                 entry_type="article",
@@ -172,6 +174,7 @@ def test_bootstrap_preview_does_not_write_to_database():
         bootstrapper.resolver.search_openalex = lambda topic, limit=5: [  # type: ignore[method-assign]
             BibEntry(entry_type="article", citation_key="preview2024graph", fields={"title": "Preview Graph Topic"})
         ]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
 
@@ -194,6 +197,7 @@ def test_bootstrap_topic_commit_limit_restricts_persisted_candidates():
             BibEntry(entry_type="article", citation_key="rank1", fields={"title": "Graph Topic One"}),
             BibEntry(entry_type="article", citation_key="rank2", fields={"title": "Graph Topic Two"}),
         ]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
@@ -227,6 +231,7 @@ def test_bootstrap_topic_candidates_are_attached_to_topic():
                 fields={"title": "Graph Topic Result", "year": "2024"},
             )
         ]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
@@ -278,6 +283,7 @@ def test_bootstrap_topic_commit_requires_title_anchor():
                 },
             ),
         ]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.crossref_expander.expand_entry_references = lambda _store, _key: []  # type: ignore[method-assign]
@@ -482,6 +488,7 @@ def test_bootstrap_preview_uses_topic_commit_limit_when_larger_than_topic_limit(
             )
             for index in range(1, 8)
         ][:limit]
+        bootstrapper.resolver.search_pubmed = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_crossref = lambda topic, limit=5: []  # type: ignore[method-assign]
         bootstrapper.resolver.search_datacite = lambda topic, limit=5: []  # type: ignore[method-assign]
 

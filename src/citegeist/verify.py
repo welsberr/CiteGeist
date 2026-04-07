@@ -149,6 +149,20 @@ class BibliographyVerifier:
                     input_type=input_type,
                     input_key=input_key,
                 )
+        if source_entry is not None and source_entry.fields.get("pmid"):
+            direct = self.resolver.resolve_pmid(source_entry.fields["pmid"])
+            if direct is not None:
+                return VerificationResult(
+                    query=query,
+                    context=context,
+                    status="exact",
+                    confidence=1.0,
+                    entry=direct.entry,
+                    source_label=direct.source_label,
+                    alternates=[],
+                    input_type=input_type,
+                    input_key=input_key,
+                )
 
         candidate_limit = max(1, limit)
         candidates = self._collect_candidates(
@@ -209,6 +223,7 @@ class BibliographyVerifier:
             ("crossref", self.resolver.search_crossref(search_title, limit=limit)),
             ("openalex", self.resolver.search_openalex(search_title, limit=limit)),
             ("datacite", self.resolver.search_datacite(search_title, limit=limit)),
+            ("pubmed", self.resolver.search_pubmed(search_title, limit=limit)),
         ):
             for entry in source_entries:
                 signature = _candidate_signature(entry)

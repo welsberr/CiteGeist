@@ -358,15 +358,12 @@ class Bootstrapper:
         })
         return results
 
-
-def _deadline_reached(deadline: float | None) -> bool:
-    return deadline is not None and time.monotonic() >= deadline
-
     def _topic_candidates(self, topic: str, seed_keys: list[str], limit: int) -> list[tuple[BibEntry, float]]:
         scored: dict[str, tuple[BibEntry, float]] = {}
 
-        for source_name, base_score, entries in (
+        for _source_name, base_score, entries in (
             ("openalex", 3.0, self.resolver.search_openalex(topic, limit=limit)),
+            ("pubmed", 2.5, self.resolver.search_pubmed(topic, limit=limit)),
             ("crossref", 2.0, self.resolver.search_crossref(topic, limit=limit)),
             ("datacite", 1.5, self.resolver.search_datacite(topic, limit=limit)),
         ):
@@ -381,6 +378,10 @@ def _deadline_reached(deadline: float | None) -> bool:
             key=lambda item: (-item[1], item[0].citation_key),
         )
         return ranked[:limit]
+
+
+def _deadline_reached(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
 
 
 def _topic_relevance_score(entry: BibEntry, topic: str) -> float:
