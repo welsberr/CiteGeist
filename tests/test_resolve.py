@@ -285,6 +285,24 @@ def test_resolver_tries_pmid_before_dblp():
     ]
 
 
+def test_resolver_pubmed_requests_include_ncbi_params():
+    resolver = MetadataResolver(ncbi_api_key="key123", ncbi_tool="citegeist", ncbi_email="dev@example.com")
+    requested_urls: list[str] = []
+
+    def fake_get_json(url: str):
+        requested_urls.append(url)
+        return {"esearchresult": {"idlist": []}}
+
+    resolver.source_client.get_json = fake_get_json  # type: ignore[method-assign]
+
+    resolver.search_pubmed("abiogenesis", limit=2)
+
+    assert requested_urls
+    assert "api_key=key123" in requested_urls[0]
+    assert "tool=citegeist" in requested_urls[0]
+    assert "email=dev%40example.com" in requested_urls[0]
+
+
 def test_openalex_work_to_entry_maps_basic_fields():
     entry = _openalex_work_to_entry(
         {

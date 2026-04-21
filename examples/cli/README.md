@@ -518,6 +518,12 @@ Run a JSON batch file:
 .venv/bin/python -m citegeist --db library.sqlite3 bootstrap-batch artificial-life.json
 ```
 
+Keep the JSON result payload while watching live progress:
+
+```bash
+.venv/bin/python -m citegeist --db library.sqlite3 bootstrap-batch artificial-life.json | tee artificial-life-bootstrap-results.json
+```
+
 ### Topic Phrase Review Workflow
 
 Apply topic phrases directly:
@@ -676,6 +682,12 @@ Control generated bootstrap defaults:
 .venv/bin/python -m citegeist example-talkorigins-scrape talkorigins-out --topic-limit 10 --topic-commit-limit 5 --status draft
 ```
 
+Run the generated bootstrap batch and save the per-job JSON results:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 bootstrap-batch talkorigins-out/talkorigins_jobs.json | tee talkorigins-bootstrap-results.json
+```
+
 Validate the generated manifest:
 
 ```bash
@@ -692,6 +704,12 @@ Inspect duplicate clusters:
 
 ```bash
 .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --min-count 2 --match origin --topic abiogenesis --preview --weak-only
+```
+
+Keep the duplicate-cluster report in a named file while reviewing the terminal output:
+
+```bash
+.venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --min-count 2 --match origin --topic abiogenesis --preview --weak-only | tee talkorigins-duplicates-preview.json
 ```
 
 Ingest the reconstructed corpus:

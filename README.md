@@ -202,6 +202,12 @@ Broad BibTeX exports skip DOI-only placeholder records such as `Referenced work 
 
 Long-running CLI commands report progress on `stderr` so `stdout` remains clean for JSON, BibTeX, or tabular output.
 
+For long-running commands that emit structured output on `stdout`, prefer `tee` with a descriptive filename so you keep a reviewable artifact without losing live terminal feedback. For example:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 bootstrap-batch talkorigins-out/talkorigins_jobs.json | tee talkorigins-bootstrap-results.json
+```
+
 BibTeX parse/render round-trips normalize simple escaped special characters such as `\_`, `\&`, and `\%` back to plain field values internally, then re-escape them on export. This prevents repeated commands such as `resolve` from turning a valid field like `discovered\_from = {...}` into `discovered\\_from = {...}` after rewriting an entry.
 
 Crossref reference expansion is intentionally conservative about weak discoveries. If a cited reference has no DOI and Crossref only exposes it as an unstructured citation blob, `expand --source crossref`, `expand-topic --source crossref`, and bootstrap flows now skip materializing that record unless the fallback metadata looks like a cleaner non-`misc` work such as conference proceedings. When Crossref does expose thesis or dissertation references only as unstructured text, citegeist now also tries to extract the actual work title instead of keeping the entire ProQuest-style citation blob in the `title` field. This reduces junk `@misc` entries and cleaner `@phdthesis` fallbacks whose `title` field is really a pasted citation string.
@@ -357,8 +363,9 @@ and the example-scoped CLI commands:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-scrape talkorigins-out --limit-topics 5 --limit-entries-per-topic 20
+PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 bootstrap-batch talkorigins-out/talkorigins_jobs.json | tee talkorigins-bootstrap-results.json
 PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-validate talkorigins-out/talkorigins_manifest.json
-PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only
+PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only | tee talkorigins-duplicates-preview.json
 ```
 
 The older `scrape-talkorigins`-style command names remain available as compatibility aliases. The full example workflow and reconstruction notes live in [examples/talkorigins/README.md](./examples/talkorigins/README.md).

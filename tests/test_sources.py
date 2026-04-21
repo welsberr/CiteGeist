@@ -1,3 +1,4 @@
+import http.client
 from pathlib import Path
 import urllib.error
 
@@ -51,3 +52,39 @@ def test_source_client_try_get_json_returns_none_on_http_error(tmp_path: Path):
     client._fetch_bytes = raise_404  # type: ignore[method-assign]
 
     assert client.try_get_json("https://example.org/missing") is None
+
+
+def test_source_client_retries_remote_disconnects(tmp_path: Path):
+    client = SourceClient(cache_dir=tmp_path / "cache", max_retries=2, retry_backoff_seconds=0.0)
+    attempts = {"count": 0}
+
+    def flaky_fetch(_url: str) -> bytes:
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise http.client.RemoteDisconnected("closed")
+        return b'{"ok": true}'
+
+    client._fetch_bytes = SourceClient._fetch_bytes.__get__(client, SourceClient)  # type: ignore[method-assign]
+    client._request = lambda url: url  # type: ignore[method-assign]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return flaky_fetch("https://example.org/test")
+
+    import urllib.request
+
+    original_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = lambda _request: FakeResponse()  # type: ignore[assignment]
+    try:
+        payload = client.get_json("https://example.org/test")
+    finally:
+        urllib.request.urlopen = original_urlopen  # type: ignore[assignment]
+
+    assert payload["ok"] is True
+    assert attempts["count"] == 3

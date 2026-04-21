@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import html
+import http.client
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -23,9 +25,15 @@ class MetadataResolver:
         self,
         user_agent: str = "citegeist/0.1 (local research tool)",
         source_client: SourceClient | None = None,
+        ncbi_api_key: str | None = None,
+        ncbi_tool: str | None = None,
+        ncbi_email: str | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.source_client = source_client or SourceClient(user_agent=user_agent)
+        self.ncbi_api_key = ncbi_api_key if ncbi_api_key is not None else os.environ.get("NCBI_API_KEY", "")
+        self.ncbi_tool = ncbi_tool if ncbi_tool is not None else os.environ.get("NCBI_TOOL", "citegeist")
+        self.ncbi_email = ncbi_email if ncbi_email is not None else os.environ.get("NCBI_EMAIL", "")
 
     def resolve_entry(self, entry: BibEntry) -> Resolution | None:
         if doi := entry.fields.get("doi"):
@@ -182,7 +190,9 @@ class MetadataResolver:
         normalized_pmid = _normalize_pmid(pmid)
         if not normalized_pmid:
             return None
-        query = urllib.parse.urlencode({"db": "pubmed", "id": normalized_pmid, "retmode": "xml"})
+        query = urllib.parse.urlencode(
+            self._ncbi_params({"db": "pubmed", "id": normalized_pmid, "retmode": "xml"})
+        )
         root = self._safe_get_xml(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?{query}")
         if root is None:
             return None
@@ -261,12 +271,12 @@ class MetadataResolver:
         if not query_text:
             return []
         query = urllib.parse.urlencode(
-            {
+            self._ncbi_params({
                 "db": "pubmed",
                 "retmode": "json",
                 "retmax": max(1, limit),
                 "term": query_text,
-            }
+            })
         )
         payload = self._safe_get_json(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?{query}")
         if payload is None:
@@ -283,19 +293,38 @@ class MetadataResolver:
     def _safe_get_json(self, url: str) -> dict | None:
         try:
             return self.source_client.get_json(url)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+        except (
+            http.client.RemoteDisconnected,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            ValueError,
+        ):
             return None
 
     def _safe_get_text(self, url: str) -> str | None:
         try:
             return self.source_client.get_text(url)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
+        except (
+            http.client.RemoteDisconnected,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            ValueError,
+        ):
             return None
 
     def _safe_get_xml(self, url: str) -> ET.Element | None:
         try:
             return self.source_client.get_xml(url)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ET.ParseError, ValueError):
+        except (
+            http.client.RemoteDisconnected,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            ET.ParseError,
+            ValueError,
+        ):
             return None
 
     def search_openalex_best_match(
@@ -344,13 +373,13 @@ class MetadataResolver:
             return []
 
         id_param = ",".join(ordered_pmids)
-        summary_query = urllib.parse.urlencode({"db": "pubmed", "retmode": "json", "id": id_param})
+        summary_query = urllib.parse.urlencode(self._ncbi_params({"db": "pubmed", "retmode": "json", "id": id_param}))
         summaries_payload = self._safe_get_json(
             f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?{summary_query}"
         ) or {}
         summaries = summaries_payload.get("result", {})
 
-        fetch_query = urllib.parse.urlencode({"db": "pubmed", "id": id_param, "retmode": "xml"})
+        fetch_query = urllib.parse.urlencode(self._ncbi_params({"db": "pubmed", "id": id_param, "retmode": "xml"}))
         root = self._safe_get_xml(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?{fetch_query}")
         articles = _pubmed_articles_by_pmid(root)
 
@@ -362,6 +391,16 @@ class MetadataResolver:
                 continue
             entries.append(_pubmed_record_to_entry(summary or {}, article, fallback_pmid=pmid))
         return entries
+
+    def _ncbi_params(self, params: dict[str, object]) -> dict[str, object]:
+        enriched = dict(params)
+        if self.ncbi_api_key:
+            enriched["api_key"] = self.ncbi_api_key
+        if self.ncbi_tool:
+            enriched["tool"] = self.ncbi_tool
+        if self.ncbi_email:
+            enriched["email"] = self.ncbi_email
+        return enriched
 
 def merge_entries(base: BibEntry, resolved: BibEntry) -> BibEntry:
     merged, _ = merge_entries_with_conflicts(base, resolved)

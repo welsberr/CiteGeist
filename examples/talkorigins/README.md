@@ -24,8 +24,9 @@ The preferred CLI commands are example-scoped:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-scrape talkorigins-out --limit-topics 5 --limit-entries-per-topic 20
+PYTHONPATH=src .venv/bin/python -m citegeist --db talkorigins.sqlite3 bootstrap-batch talkorigins-out/talkorigins_jobs.json | tee talkorigins-bootstrap-results.json
 PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-validate talkorigins-out/talkorigins_manifest.json
-PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only
+PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-duplicates talkorigins-out/talkorigins_manifest.json --limit 20 --preview --weak-only | tee talkorigins-duplicates-preview.json
 PYTHONPATH=src .venv/bin/python -m citegeist example-talkorigins-suggest-phrases talkorigins-out/talkorigins_manifest.json --output topic-phrases.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 stage-topic-phrases topic-phrases.json
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic-phrase-reviews --output topic-phrase-review.json
@@ -48,5 +49,6 @@ The example scrape writes:
 
 ## Notes
 
+- Long-running commands print progress to `stderr`, so JSON or tabular results on `stdout` can be safely captured with `tee` into named files such as `talkorigins-bootstrap-results.json`.
 - The example-specific CLI names have compatibility aliases matching the older `scrape-talkorigins` style commands.
 - Topic phrase staging, review, and export commands are generic `citegeist` functionality and are not specific to TalkOrigins.

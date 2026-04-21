@@ -8,3 +8,7 @@ library.sqlite3
 ops/
 .codex
 SESSION_*
+topic-*
+talkorigins-out/
+talkorigins.sqlite3
+to_batch.sh*
