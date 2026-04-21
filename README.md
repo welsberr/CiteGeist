@@ -172,6 +172,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --ba
 PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --backend heuristic --backend grobid --summary --output compare-summary.json
 PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --backend heuristic --backend grobid --summary --max-rows-with-differences 0 --output compare-check.json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --string '"Graph-first bibliography augmentation" Smith 2024' --context "citation graphs" --format json
+PYTHONPATH=src .venv/bin/python -m citegeist verify --string 'Evans 1960' --context "bottlenose dolphin echolocation" --llm --llm-base-url http://localhost:11434 --llm-model qwen3 --llm-role both --format json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --bib draft.bib --output verified.bib
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
@@ -256,6 +257,58 @@ The built-in extraction backends are:
 - `grobid`: an optional adapter around a running GROBID service using `/api/processCitationList`
 
 The backend interface exists so future GROBID- or other parser adapters can be registered without replacing the local parser or changing the CLI contract.
+
+## LLM-Assisted Verify
+
+`citegeist verify` can optionally use a local LLM for two bounded tasks:
+
+- `expand`: infer missing bibliographic clues from free text and context
+- `rerank`: advisory reranking of already fetched resolver candidates
+
+Example:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist verify \
+  --string 'Evans 1960' \
+  --context "bottlenose dolphin echolocation" \
+  --llm \
+  --llm-base-url http://localhost:11434 \
+  --llm-model qwen3 \
+  --llm-role both \
+  --format json
+```
+
+Supported local endpoint styles:
+
+- OpenAI-compatible APIs such as `http://localhost:11434/v1`
+- Ollama native chat APIs such as `http://localhost:11434`
+
+For the current local GenieHive setup, this also works directly:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist verify \
+  --string 'Evans 1960' \
+  --context "bottlenose dolphin echolocation" \
+  --llm \
+  --llm-base-url http://127.0.0.1:8800/v1 \
+  --llm-api-key change-me-client-key \
+  --llm-model general_assistant \
+  --llm-role both \
+  --format json
+```
+
+There is also a local smoke script for the LLM helper path alone:
+
+```bash
+make live-verify-llm-smoke
+```
+
+Safety constraints:
+
+- the LLM is never trusted for DOI or identifier invention
+- the LLM only fills missing query clues or suggests candidate order
+- `exact` status still requires verified resolver evidence, not LLM output
+- if the LLM fails or returns unusable JSON, `verify` falls back to the normal resolver-only path
 
 To compare backend output on the same plaintext references, use `compare-extract`. It aligns entries by ordinal/reference block and emits JSON with per-backend payloads plus a `differing_fields` summary for each row. Add `--summary` when you want a compact evaluation artifact with disagreement counts by field and backend presence counts instead of the full row-by-row payload. Add `--max-rows-with-differences` and/or `--max-field-difference-count` when you want CI-style failure thresholds; the command will emit the summary JSON and return a nonzero exit code if the limits are exceeded.
 

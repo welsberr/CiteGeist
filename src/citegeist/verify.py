@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
+from .llm_verify import VerificationLlmClient, VerificationLlmConfig
 from .resolve import MetadataResolver, Resolution
 
 
@@ -75,8 +76,16 @@ class VerificationResult:
 
 
 class BibliographyVerifier:
-    def __init__(self, resolver: MetadataResolver | None = None) -> None:
+    def __init__(
+        self,
+        resolver: MetadataResolver | None = None,
+        *,
+        llm_config: VerificationLlmConfig | None = None,
+        llm_client: VerificationLlmClient | None = None,
+    ) -> None:
         self.resolver = resolver or MetadataResolver()
+        self.llm_config = llm_config
+        self.llm_client = llm_client or VerificationLlmClient()
 
     def verify_string(self, value: str, context: str = "", limit: int = 5) -> VerificationResult:
         query_fields = _fields_from_string(value)
@@ -164,10 +173,18 @@ class BibliographyVerifier:
                     input_key=input_key,
                 )
 
+        query_fields = _clone_query_fields(query_fields)
+        search_query = query
+        if self.llm_config is not None:
+            hints = self.llm_client.analyze_query(self.llm_config, query, context)
+            if hints:
+                _apply_llm_hints(query_fields, hints)
+                search_query = _build_search_query(search_query, hints)
+
         candidate_limit = max(1, limit)
         candidates = self._collect_candidates(
             title=str(query_fields.get("title", "")),
-            query=query,
+            query=search_query,
             limit=candidate_limit,
         )
         scored = [
@@ -178,9 +195,21 @@ class BibliographyVerifier:
             )
             for entry, source_label in candidates
         ]
+        llm_ranks = _compute_llm_ranks(
+            self.llm_client.rerank_candidates(
+                self.llm_config,
+                query_fields,
+                context,
+                [match.entry for match in scored],
+            )
+            if self.llm_config is not None
+            else None,
+            scored,
+        )
         scored.sort(
             key=lambda item: (
                 -item.score,
+                llm_ranks.get(item.entry.citation_key, len(scored)),
                 item.entry.fields.get("year", ""),
                 item.entry.citation_key,
             )
@@ -253,6 +282,31 @@ def _fields_from_string(value: str) -> dict[str, object]:
     author_tokens = [token.strip(",.;:") for token in author_source.split() if token.strip(",.;:")]
     authors: list[str] = [author_tokens[0]] if author_tokens else []
     return {"title": title, "authors": authors, "year": year, "venue": ""}
+
+
+def _clone_query_fields(query_fields: dict[str, object]) -> dict[str, object]:
+    cloned = dict(query_fields)
+    authors = cloned.get("authors", [])
+    cloned["authors"] = list(authors) if isinstance(authors, list) else []
+    return cloned
+
+
+def _apply_llm_hints(query_fields: dict[str, object], hints: dict[str, object]) -> None:
+    if not str(query_fields.get("title", "")).strip() and hints.get("title"):
+        query_fields["title"] = str(hints["title"])
+    if not query_fields.get("authors") and hints.get("authors"):
+        query_fields["authors"] = [str(author) for author in hints["authors"] if str(author).strip()]
+    if not str(query_fields.get("year", "")).strip() and hints.get("year"):
+        query_fields["year"] = str(hints["year"])
+    if not str(query_fields.get("venue", "")).strip() and hints.get("venue"):
+        query_fields["venue"] = str(hints["venue"])
+
+
+def _build_search_query(query: str, hints: dict[str, object]) -> str:
+    keywords = [str(value).strip() for value in hints.get("keywords", []) if str(value).strip()]
+    if not keywords:
+        return query
+    return " ".join(part for part in [query, " ".join(keywords[:5])] if part).strip()
 
 
 def _score_candidate(query_fields: dict[str, object], context: str, entry: BibEntry) -> float:
@@ -371,3 +425,13 @@ def _placeholder_entry(query_fields: dict[str, object], query: str, input_key: s
 def _slugify_key(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "", value.lower())
     return slug[:40] or "verification"
+
+
+def _compute_llm_ranks(order: list[int] | None, matches: list[VerificationMatch]) -> dict[str, int]:
+    if not order:
+        return {}
+    ranks: dict[str, int] = {}
+    for rank, index in enumerate(order):
+        if 0 <= index < len(matches):
+            ranks[matches[index].entry.citation_key] = rank
+    return ranks

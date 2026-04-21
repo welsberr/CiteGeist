@@ -246,7 +246,13 @@ class BibliographyStore:
                 entry.fields.get("isbn"),
                 fulltext,
                 raw_bibtex,
-                json.dumps({k: v for k, v in entry.fields.items() if k not in CORE_ENTRY_FIELDS and k not in RELATION_FIELDS}),
+                json.dumps(
+                    {
+                        k: v
+                        for k, v in entry.fields.items()
+                        if k not in CORE_ENTRY_FIELDS and k not in RELATION_FIELDS and k not in {"author", "editor"}
+                    }
+                ),
             ),
         ).fetchone()
         entry_id = int(row["id"])
@@ -1142,6 +1148,8 @@ class BibliographyStore:
 
         extra_fields = json.loads(row["extra_fields_json"])
         for field_name in sorted(extra_fields):
+            if field_name in {"author", "editor"}:
+                continue
             value = extra_fields[field_name]
             if value:
                 fields[field_name] = str(value)

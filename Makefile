@@ -1,7 +1,7 @@
 PYTHONPATH_SRC=PYTHONPATH=src
 VENV_PYTHON=.venv/bin/python
 
-.PHONY: test test-live live-smoke validate-talkorigins
+.PHONY: test test-live live-smoke live-verify-llm-smoke validate-talkorigins
 
 test:
 	$(PYTHONPATH_SRC) $(VENV_PYTHON) -m pytest -q
@@ -11,6 +11,9 @@ test-live:
 
 live-smoke:
 	CITEGEIST_SOURCE_CACHE=.cache/citegeist $(PYTHONPATH_SRC) $(VENV_PYTHON) scripts/live_smoke.py
+
+live-verify-llm-smoke:
+	$(PYTHONPATH_SRC) $(VENV_PYTHON) scripts/live_verify_llm_smoke.py
 
 validate-talkorigins:
 	$(PYTHONPATH_SRC) $(VENV_PYTHON) -m citegeist validate-talkorigins talkorigins-out/talkorigins_manifest.json

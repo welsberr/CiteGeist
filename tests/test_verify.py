@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from citegeist.bibtex import BibEntry
+from citegeist.llm_verify import VerificationLlmConfig, _loads_lenient_json
 from citegeist.resolve import Resolution
 from citegeist.verify import BibliographyVerifier
 
@@ -120,3 +121,102 @@ def test_verification_result_to_bib_entry_contains_audit_fields():
 
     assert bib_entry.fields["x_status"] == "not_found"
     assert bib_entry.fields["x_query"] == "Missing Work"
+
+
+def test_verifier_llm_expand_only_fills_missing_fields():
+    class _FakeLlmClient:
+        def analyze_query(self, config, query, context):
+            return {
+                "title": "Expanded Title",
+                "authors": ["Smith"],
+                "year": "2024",
+                "venue": "Journal of Tests",
+                "keywords": ["echolocation", "marine"],
+            }
+
+        def rerank_candidates(self, config, query_fields, context, candidates):
+            return None
+
+    verifier = BibliographyVerifier(
+        llm_config=VerificationLlmConfig(base_url="http://localhost:11434", model="qwen", role="expand"),
+        llm_client=_FakeLlmClient(),
+    )
+    seen_titles: list[str] = []
+    verifier.resolver.search_crossref = lambda title, limit=5: (seen_titles.append(title) or [])  # type: ignore[method-assign]
+    verifier.resolver.search_openalex = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_datacite = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_pubmed = lambda title, limit=5: []  # type: ignore[method-assign]
+
+    verifier.verify_string("Evans 1960", context="bottlenose dolphin echolocation")
+
+    assert seen_titles == ["Expanded Title"]
+
+
+def test_verifier_llm_rerank_only_breaks_score_ties():
+    class _FakeLlmClient:
+        def analyze_query(self, config, query, context):
+            return None
+
+        def rerank_candidates(self, config, query_fields, context, candidates):
+            return [1, 0]
+
+    verifier = BibliographyVerifier(
+        llm_config=VerificationLlmConfig(base_url="http://localhost:11434", model="qwen", role="rerank"),
+        llm_client=_FakeLlmClient(),
+    )
+    verifier.resolver.search_crossref = lambda title, limit=5: [  # type: ignore[method-assign]
+        BibEntry(
+            entry_type="article",
+            citation_key="alpha",
+            fields={"author": "Smith, Jane", "title": "Shared Match Primary", "year": "2024"},
+        ),
+        BibEntry(
+            entry_type="article",
+            citation_key="beta",
+            fields={"author": "Smith, Jane", "title": "Shared Match Secondary", "year": "2024"},
+        ),
+    ]
+    verifier.resolver.search_openalex = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_datacite = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_pubmed = lambda title, limit=5: []  # type: ignore[method-assign]
+
+    result = verifier.verify_string('"Shared Match" Smith 2024')
+
+    assert result.entry.citation_key == "beta"
+    assert result.alternates[0].entry.citation_key == "alpha"
+
+
+def test_verifier_llm_cannot_create_exact_without_verified_doi():
+    class _FakeLlmClient:
+        def analyze_query(self, config, query, context):
+            return {"title": "Resolved Work", "authors": ["Smith"], "year": "2024", "venue": None, "keywords": []}
+
+        def rerank_candidates(self, config, query_fields, context, candidates):
+            return None
+
+    verifier = BibliographyVerifier(
+        llm_config=VerificationLlmConfig(base_url="http://localhost:11434", model="qwen", role="expand"),
+        llm_client=_FakeLlmClient(),
+    )
+    verifier.resolver.search_crossref = lambda title, limit=5: [  # type: ignore[method-assign]
+        BibEntry(
+            entry_type="article",
+            citation_key="candidate",
+            fields={"author": "Smith, Jane", "title": "Resolved Work", "year": "2024"},
+        )
+    ]
+    verifier.resolver.search_openalex = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_datacite = lambda title, limit=5: []  # type: ignore[method-assign]
+    verifier.resolver.search_pubmed = lambda title, limit=5: []  # type: ignore[method-assign]
+
+    result = verifier.verify_string("Smith 2024", context="citation graphs")
+
+    assert result.status != "exact"
+
+
+def test_llm_json_loader_accepts_fenced_payload():
+    payload = '```json\n{"title":"Resolved Work","authors":["Smith"],"keywords":["graphs"]}\n```'
+
+    result = _loads_lenient_json(payload)
+
+    assert result["title"] == "Resolved Work"

@@ -247,6 +247,71 @@ def test_cli_verify_bib_outputs_json(tmp_path: Path):
     assert payload[0]["entry"]["citation_key"] == "candidate2024"
 
 
+def test_cli_verify_rejects_incomplete_llm_config(tmp_path: Path):
+    stderr_buffer = io.StringIO()
+    with redirect_stderr(stderr_buffer):
+        exit_code = main(
+            [
+                "--db",
+                str(tmp_path / "library.sqlite3"),
+                "verify",
+                "--string",
+                "Evans 1960",
+                "--llm",
+            ]
+        )
+
+    assert exit_code == 1
+    assert "--llm requires --llm-base-url and --llm-model" in stderr_buffer.getvalue()
+
+
+def test_cli_verify_builds_llm_config(tmp_path: Path):
+    from citegeist.bibtex import BibEntry
+    from citegeist.verify import VerificationResult
+
+    database = tmp_path / "library.sqlite3"
+    with patch("citegeist.cli.BibliographyVerifier") as mocked_verifier_cls:
+        mocked_verifier = mocked_verifier_cls.return_value
+        mocked_verifier.verify_string.return_value = VerificationResult(
+            query="Evans 1960",
+            context="marine mammals",
+            status="ambiguous",
+            confidence=0.6,
+            entry=BibEntry(entry_type="misc", citation_key="evans1960", fields={"title": "Evans 1960"}),
+            source_label="none",
+            alternates=[],
+            input_type="string",
+            input_key=None,
+        )
+
+        stdout_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer):
+            exit_code = main(
+                [
+                    "--db",
+                    str(database),
+                    "verify",
+                    "--string",
+                    "Evans 1960",
+                    "--llm",
+                    "--llm-base-url",
+                    "http://localhost:11434",
+                    "--llm-model",
+                    "qwen3",
+                    "--llm-role",
+                    "rerank",
+                    "--format",
+                    "json",
+                ]
+            )
+
+    assert exit_code == 0
+    kwargs = mocked_verifier_cls.call_args.kwargs
+    assert kwargs["llm_config"].base_url == "http://localhost:11434"
+    assert kwargs["llm_config"].model == "qwen3"
+    assert kwargs["llm_config"].role == "rerank"
+
+
 def test_cli_sync_jabref_ingests_resolves_and_exports(tmp_path: Path):
     bib_path = tmp_path / "jabref-library.bib"
     bib_path.write_text(

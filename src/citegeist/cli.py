@@ -20,6 +20,7 @@ from .extract import (
     summarize_extraction_comparison,
 )
 from .harvest import OaiPmhHarvester
+from .llm_verify import VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries_with_conflicts
 from .storage import BibliographyStore
 from .verify import BibliographyVerifier, render_verification_results
@@ -145,6 +146,22 @@ def build_parser() -> argparse.ArgumentParser:
     verify_group.add_argument("--bib", help="Path to a BibTeX file whose entries should be verified")
     verify_parser.add_argument("--context", default="", help="Optional topic context used for scoring")
     verify_parser.add_argument("--limit", type=int, default=5, help="Maximum candidates to inspect per input")
+    verify_parser.add_argument("--llm", action="store_true", help="Enable optional local LLM assistance for verify")
+    verify_parser.add_argument("--llm-base-url", help="OpenAI-compatible or Ollama base URL for local LLM assistance")
+    verify_parser.add_argument("--llm-model", help="Model ID for local LLM assistance")
+    verify_parser.add_argument("--llm-api-key", default="", help="Optional API key for the LLM endpoint")
+    verify_parser.add_argument(
+        "--llm-provider",
+        choices=["auto", "openai", "ollama-native"],
+        default="auto",
+        help="LLM API style; auto treats `/v1` endpoints as OpenAI-compatible",
+    )
+    verify_parser.add_argument(
+        "--llm-role",
+        choices=["expand", "rerank", "both"],
+        default="both",
+        help="Use the local LLM for query-clue extraction, candidate reranking, or both",
+    )
     verify_parser.add_argument(
         "--format",
         choices=["bibtex", "json"],
@@ -715,7 +732,21 @@ def main(argv: list[str] | None = None) -> int:
                 args.output,
             )
         if args.command == "verify":
-            return _run_verify(args.string, args.list_input, args.bib, args.context, args.limit, args.format, args.output)
+            return _run_verify(
+                args.string,
+                args.list_input,
+                args.bib,
+                args.context,
+                args.limit,
+                args.format,
+                args.output,
+                llm_enabled=args.llm,
+                llm_base_url=args.llm_base_url,
+                llm_model=args.llm_model,
+                llm_api_key=args.llm_api_key,
+                llm_provider=args.llm_provider,
+                llm_role=args.llm_role,
+            )
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
         if args.command == "resolve-stubs":
@@ -750,8 +781,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.rounds,
                 args.recent_years,
                 args.target_recent_entries,
-                args.max_expanded_entries,
-                args.max_expand_seconds,
             )
         if args.command == "set-topic-phrase":
             return _run_set_topic_phrase(store, args.topic_slug, args.phrase, args.clear)
@@ -785,6 +814,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.expansion_rounds,
                 args.recent_years,
                 args.target_recent_entries,
+                args.max_expanded_entries,
+                args.max_expand_seconds,
             )
         if args.command == "bootstrap-batch":
             return _run_bootstrap_batch(store, Path(args.input))
@@ -1121,8 +1152,27 @@ def _run_verify(
     limit: int,
     output_format: str,
     output: str | None,
+    *,
+    llm_enabled: bool = False,
+    llm_base_url: str | None = None,
+    llm_model: str | None = None,
+    llm_api_key: str = "",
+    llm_provider: str = "auto",
+    llm_role: str = "both",
 ) -> int:
-    verifier = BibliographyVerifier()
+    llm_config = None
+    if llm_enabled:
+        if not llm_base_url or not llm_model:
+            print("--llm requires --llm-base-url and --llm-model", file=sys.stderr)
+            return 1
+        llm_config = VerificationLlmConfig(
+            base_url=llm_base_url,
+            model=llm_model,
+            api_key=llm_api_key,
+            provider=llm_provider,
+            role=llm_role,
+        )
+    verifier = BibliographyVerifier(llm_config=llm_config)
     if string_input is not None:
         results = [verifier.verify_string(string_input, context=context, limit=limit)]
     elif list_input is not None:

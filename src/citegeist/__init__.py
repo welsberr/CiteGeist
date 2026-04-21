@@ -13,6 +13,7 @@ from .extract import (
     summarize_extraction_comparison,
 )
 from .harvest import OaiMetadataFormat, OaiPmhHarvester, OaiSet
+from .llm_verify import VerificationLlmClient, VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries, merge_entries_with_conflicts
 from .sources import SourceClient
 from .storage import BibliographyStore
@@ -34,6 +35,8 @@ __all__ = [
     "OaiMetadataFormat",
     "OaiSet",
     "SourceClient",
+    "VerificationLlmClient",
+    "VerificationLlmConfig",
     "VerificationMatch",
     "VerificationResult",
     "available_extraction_backends",

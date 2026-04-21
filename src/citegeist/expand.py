@@ -196,7 +196,7 @@ class OpenAlexExpander:
             )
             results.append(
                 ExpansionResult(
-                    source_citation_key=citation_key,
+                    source_citation_key=source_key,
                     discovered_citation_key=existing_key or discovered.citation_key,
                     created_entry=created,
                     relation_type=relation_type,
@@ -335,7 +335,7 @@ class TopicExpander:
                             assigned_to_topic=assigned,
                         )
                     )
-                    if target_recent_entries is not None and len(recent_topic_hits) >= target_recent_entries:
+                    if target_recent_entries is not None and len(recent_hits) >= target_recent_entries:
                         self.last_run_meta.update({
                             "stop_reason": "target_recent_entries",
                             "recent_hits": len(recent_hits),
