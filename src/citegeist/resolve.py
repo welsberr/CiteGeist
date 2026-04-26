@@ -7,10 +7,24 @@ import re
 import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .bibtex import BibEntry, parse_bibtex
+from .sources.europepmc import EuropePmcSource
+from .sources.openlibrary import OpenLibrarySource
+from .sources.semanticscholar import SemanticScholarSource
 from .sources import SourceClient
+
+
+@dataclass(slots=True)
+class ResolutionAttempt:
+    source_name: str
+    strategy: str
+    query_value: str
+    matched: bool
+    candidate_count: int | None = None
+    source_label: str = ""
+    error: str = ""
 
 
 @dataclass(slots=True)
@@ -18,6 +32,13 @@ class Resolution:
     entry: BibEntry
     source_type: str
     source_label: str
+    attempts: list[ResolutionAttempt] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ResolutionOutcome:
+    resolution: Resolution | None
+    attempts: list[ResolutionAttempt]
 
 
 class MetadataResolver:
@@ -31,70 +52,109 @@ class MetadataResolver:
     ) -> None:
         self.user_agent = user_agent
         self.source_client = source_client or SourceClient(user_agent=user_agent)
+        self.europepmc = EuropePmcSource(config={"source_client": self.source_client, "user_agent": user_agent})
+        self.openlibrary = OpenLibrarySource(config={"source_client": self.source_client, "user_agent": user_agent})
+        self.semanticscholar = SemanticScholarSource(config={"user_agent": user_agent})
         self.ncbi_api_key = ncbi_api_key if ncbi_api_key is not None else os.environ.get("NCBI_API_KEY", "")
         self.ncbi_tool = ncbi_tool if ncbi_tool is not None else os.environ.get("NCBI_TOOL", "citegeist")
         self.ncbi_email = ncbi_email if ncbi_email is not None else os.environ.get("NCBI_EMAIL", "")
 
     def resolve_entry(self, entry: BibEntry) -> Resolution | None:
+        return self.resolve_entry_with_trace(entry).resolution
+
+    def resolve_entry_with_trace(self, entry: BibEntry) -> ResolutionOutcome:
+        attempts: list[ResolutionAttempt] = []
         if doi := entry.fields.get("doi"):
-            resolved = self.resolve_doi(doi)
+            resolved = self._attempt_direct_resolution(attempts, "crossref", "doi_lookup", doi, self.resolve_doi)
             if resolved is not None:
-                return resolved
-            resolved = self.resolve_datacite_doi(doi)
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_direct_resolution(
+                attempts, "datacite", "doi_lookup", doi, self.resolve_datacite_doi
+            )
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_direct_resolution(
+                attempts, "europepmc", "doi_lookup", doi, self.resolve_europepmc_doi
+            )
+            if resolved is not None:
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_direct_resolution(
+                attempts, "semanticscholar", "doi_lookup", doi, self.resolve_semanticscholar_doi
+            )
+            if resolved is not None:
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
         if pmid := entry.fields.get("pmid"):
-            resolved = self.resolve_pmid(pmid)
+            resolved = self._attempt_direct_resolution(attempts, "pubmed", "pmid_lookup", pmid, self.resolve_pmid)
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
         if openalex_id := entry.fields.get("openalex"):
-            resolved = self.resolve_openalex(openalex_id)
+            resolved = self._attempt_direct_resolution(
+                attempts, "openalex", "work_lookup", openalex_id, self.resolve_openalex
+            )
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
         if dblp_key := entry.fields.get("dblp"):
-            resolved = self.resolve_dblp(dblp_key)
+            resolved = self._attempt_direct_resolution(attempts, "dblp", "key_lookup", dblp_key, self.resolve_dblp)
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
         if arxiv_id := entry.fields.get("arxiv"):
-            resolved = self.resolve_arxiv(arxiv_id)
+            resolved = self._attempt_direct_resolution(
+                attempts, "arxiv", "id_lookup", arxiv_id, self.resolve_arxiv
+            )
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
         if title := entry.fields.get("title"):
-            resolved = self.search_crossref_best_match(
-                title=title,
-                author_text=entry.fields.get("author", ""),
-                year=entry.fields.get("year", ""),
+            author_text = entry.fields.get("author", "")
+            year = entry.fields.get("year", "")
+            resolved = self._attempt_title_search_resolution(
+                attempts, "crossref", title, author_text, year, self.search_crossref
             )
             if resolved is not None:
-                return resolved
-            resolved = self.search_datacite_best_match(
-                title=title,
-                author_text=entry.fields.get("author", ""),
-                year=entry.fields.get("year", ""),
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_title_search_resolution(
+                attempts, "datacite", title, author_text, year, self.search_datacite
             )
             if resolved is not None:
-                return resolved
-            resolved = self.search_openalex_best_match(
-                title=title,
-                author_text=entry.fields.get("author", ""),
-                year=entry.fields.get("year", ""),
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_title_search_resolution(
+                attempts, "openalex", title, author_text, year, self.search_openalex
             )
             if resolved is not None:
-                return resolved
-            resolved = self.search_pubmed_best_match(
-                title=title,
-                author_text=entry.fields.get("author", ""),
-                year=entry.fields.get("year", ""),
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_title_search_resolution(
+                attempts, "pubmed", title, author_text, year, self.search_pubmed
             )
             if resolved is not None:
-                return resolved
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_title_search_resolution(
+                attempts, "europepmc", title, author_text, year, self.search_europepmc
+            )
+            if resolved is not None:
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            resolved = self._attempt_title_search_resolution(
+                attempts, "semanticscholar", title, author_text, year, self.search_semanticscholar
+            )
+            if resolved is not None:
+                return ResolutionOutcome(resolution=resolved, attempts=attempts)
+            if _entry_prefers_catalog_search(entry):
+                resolved = self._attempt_title_search_resolution(
+                    attempts,
+                    "openlibrary",
+                    title,
+                    author_text,
+                    year,
+                    self.search_openlibrary,
+                    selector=_select_best_catalog_title_match,
+                )
+                if resolved is not None:
+                    return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
-        return None
+        return ResolutionOutcome(resolution=None, attempts=attempts)
 
     def resolve_doi(self, doi: str) -> Resolution | None:
         encoded = urllib.parse.quote(doi, safe="")
@@ -124,19 +184,7 @@ class MetadataResolver:
         author_text: str = "",
         year: str = "",
     ) -> Resolution | None:
-        candidate = _select_best_title_match(
-            self.search_crossref(title, limit=5),
-            title=title,
-            author_text=author_text,
-            year=year,
-        )
-        if candidate is None:
-            return None
-        return Resolution(
-            entry=candidate,
-            source_type="resolver",
-            source_label=f"crossref:search:{title}",
-        )
+        return self._search_best_match_resolution("crossref", title, author_text, year, self.search_crossref)
 
     def resolve_dblp(self, dblp_key: str) -> Resolution | None:
         encoded_key = urllib.parse.quote(dblp_key, safe="/:")
@@ -245,19 +293,7 @@ class MetadataResolver:
         author_text: str = "",
         year: str = "",
     ) -> Resolution | None:
-        candidate = _select_best_title_match(
-            self.search_datacite(title, limit=5),
-            title=title,
-            author_text=author_text,
-            year=year,
-        )
-        if candidate is None:
-            return None
-        return Resolution(
-            entry=candidate,
-            source_type="resolver",
-            source_label=f"datacite:search:{title}",
-        )
+        return self._search_best_match_resolution("datacite", title, author_text, year, self.search_datacite)
 
     def search_openalex(self, title: str, limit: int = 5) -> list[BibEntry]:
         query = urllib.parse.urlencode({"search": title, "per-page": limit})
@@ -289,6 +325,35 @@ class MetadataResolver:
         if not ids:
             return []
         return self._fetch_pubmed_entries(ids[:limit])
+
+    def resolve_europepmc_doi(self, doi: str) -> Resolution | None:
+        entry = self.europepmc.lookup_by_doi(doi)
+        if entry is None:
+            return None
+        return Resolution(
+            entry=entry,
+            source_type="resolver",
+            source_label=f"europepmc:doi:{doi}",
+        )
+
+    def search_europepmc(self, title: str, limit: int = 5) -> list[BibEntry]:
+        return self.europepmc.search(title, limit=limit)
+
+    def search_openlibrary(self, title: str, limit: int = 5) -> list[BibEntry]:
+        return self.openlibrary.search(title, limit=limit)
+
+    def resolve_semanticscholar_doi(self, doi: str) -> Resolution | None:
+        entry = self.semanticscholar.lookup_by_doi(doi)
+        if entry is None:
+            return None
+        return Resolution(
+            entry=entry,
+            source_type="resolver",
+            source_label=f"semanticscholar:doi:{doi}",
+        )
+
+    def search_semanticscholar(self, title: str, limit: int = 5) -> list[BibEntry]:
+        return self.semanticscholar.search(title, limit=limit)
 
     def _safe_get_json(self, url: str) -> dict | None:
         try:
@@ -333,19 +398,7 @@ class MetadataResolver:
         author_text: str = "",
         year: str = "",
     ) -> Resolution | None:
-        candidate = _select_best_title_match(
-            self.search_openalex(title, limit=5),
-            title=title,
-            author_text=author_text,
-            year=year,
-        )
-        if candidate is None:
-            return None
-        return Resolution(
-            entry=candidate,
-            source_type="resolver",
-            source_label=f"openalex:search:{title}",
-        )
+        return self._search_best_match_resolution("openalex", title, author_text, year, self.search_openalex)
 
     def search_pubmed_best_match(
         self,
@@ -353,19 +406,122 @@ class MetadataResolver:
         author_text: str = "",
         year: str = "",
     ) -> Resolution | None:
-        candidate = _select_best_title_match(
-            self.search_pubmed(title, limit=5),
-            title=title,
-            author_text=author_text,
-            year=year,
+        return self._search_best_match_resolution("pubmed", title, author_text, year, self.search_pubmed)
+
+    def search_europepmc_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        return self._search_best_match_resolution("europepmc", title, author_text, year, self.search_europepmc)
+
+    def search_semanticscholar_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        return self._search_best_match_resolution(
+            "semanticscholar", title, author_text, year, self.search_semanticscholar
         )
+
+    def search_openlibrary_best_match(
+        self,
+        title: str,
+        author_text: str = "",
+        year: str = "",
+    ) -> Resolution | None:
+        return self._search_best_match_resolution("openlibrary", title, author_text, year, self.search_openlibrary)
+
+    def _search_best_match_resolution(
+        self, source_name: str, title: str, author_text: str, year: str, search_func
+    ) -> Resolution | None:
+        candidates = search_func(title, limit=5)
+        candidate = _select_best_title_match(candidates, title=title, author_text=author_text, year=year)
         if candidate is None:
             return None
-        return Resolution(
-            entry=candidate,
-            source_type="resolver",
-            source_label=f"pubmed:search:{title}",
+        return Resolution(entry=candidate, source_type="resolver", source_label=f"{source_name}:search:{title}")
+
+    def _attempt_direct_resolution(
+        self,
+        attempts: list[ResolutionAttempt],
+        source_name: str,
+        strategy: str,
+        query_value: str,
+        resolver_func,
+    ) -> Resolution | None:
+        try:
+            resolution = resolver_func(query_value)
+        except Exception as exc:
+            attempts.append(
+                ResolutionAttempt(
+                    source_name=source_name,
+                    strategy=strategy,
+                    query_value=query_value,
+                    matched=False,
+                    error=str(exc),
+                )
+            )
+            return None
+        attempts.append(
+            ResolutionAttempt(
+                source_name=source_name,
+                strategy=strategy,
+                query_value=query_value,
+                matched=resolution is not None,
+                source_label=resolution.source_label if resolution is not None else "",
+            )
         )
+        if resolution is not None and not resolution.attempts:
+            resolution.attempts = list(attempts)
+        return resolution
+
+    def _attempt_title_search_resolution(
+        self,
+        attempts: list[ResolutionAttempt],
+        source_name: str,
+        title: str,
+        author_text: str,
+        year: str,
+        search_func,
+        selector=None,
+    ) -> Resolution | None:
+        try:
+            candidates = search_func(title, limit=5)
+        except Exception as exc:
+            attempts.append(
+                ResolutionAttempt(
+                    source_name=source_name,
+                    strategy="title_search",
+                    query_value=title,
+                    matched=False,
+                    error=str(exc),
+                )
+            )
+            return None
+        match_selector = selector or _select_best_title_match
+        candidate = match_selector(candidates, title=title, author_text=author_text, year=year)
+        resolution = None
+        if candidate is not None:
+            resolution = Resolution(
+                entry=candidate,
+                source_type="resolver",
+                source_label=f"{source_name}:search:{title}",
+            )
+        attempts.append(
+            ResolutionAttempt(
+                source_name=source_name,
+                strategy="title_search",
+                query_value=title,
+                matched=resolution is not None,
+                candidate_count=len(candidates),
+                source_label=resolution.source_label if resolution is not None else "",
+            )
+        )
+        if resolution is not None and not resolution.attempts:
+            resolution.attempts = list(attempts)
+        return resolution
 
     def _fetch_pubmed_entries(self, pmids: list[str]) -> list[BibEntry]:
         ordered_pmids = [pmid for pmid in dict.fromkeys(pmids) if pmid]
@@ -768,6 +924,42 @@ def _select_best_title_match(
     return None
 
 
+def _select_best_catalog_title_match(
+    candidates: list[BibEntry],
+    title: str,
+    author_text: str = "",
+    year: str = "",
+) -> BibEntry | None:
+    if not candidates:
+        return None
+
+    title_tokens = _catalog_title_tokens(title)
+    author_tokens = _author_match_tokens(author_text)
+    year_text = str(year or "").strip()
+    scored: list[tuple[float, BibEntry]] = []
+
+    for candidate in candidates:
+        candidate_title_tokens = _catalog_title_tokens(candidate.fields.get("title", ""))
+        if not candidate_title_tokens:
+            continue
+        overlap = len(title_tokens & candidate_title_tokens)
+        union = len(title_tokens | candidate_title_tokens)
+        score = (overlap / union) if union else 0.0
+        if score < 0.6:
+            continue
+        candidate_year = str(candidate.fields.get("year", "") or "").strip()
+        if year_text and candidate_year and year_text != candidate_year:
+            continue
+        if author_tokens and not _candidate_matches_author_tokens(candidate, author_tokens):
+            continue
+        scored.append((score, candidate))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (-item[0], item[1].citation_key))
+    return scored[0][1]
+
+
 def _author_match_tokens(author_text: str) -> set[str]:
     normalized = _normalize_match_text(author_text)
     if not normalized:
@@ -786,6 +978,39 @@ def _candidate_matches_author_tokens(candidate: BibEntry, author_tokens: set[str
         return False
     candidate_tokens = set(re.findall(r"[a-z0-9]+", candidate_author))
     return bool(author_tokens & candidate_tokens)
+
+
+def _catalog_title_tokens(value: str) -> set[str]:
+    normalized = _normalize_match_text(value)
+    stopwords = {"the", "and", "for", "with", "from", "into", "after", "all"}
+    return {
+        f"{token[:-4]}ic" if token.endswith("ical") and len(token) > 6 else token
+        for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 4 and token not in stopwords
+    }
+
+
+def _entry_prefers_catalog_search(entry: BibEntry) -> bool:
+    if entry.entry_type in {"book", "incollection", "phdthesis", "mastersthesis"}:
+        return True
+    title = _normalize_match_text(entry.fields.get("title", ""))
+    venue = _normalize_match_text(
+        " ".join(
+            filter(
+                None,
+                [
+                    entry.fields.get("publisher", ""),
+                    entry.fields.get("howpublished", ""),
+                    entry.fields.get("booktitle", ""),
+                ],
+            )
+        )
+    )
+    if entry.entry_type != "misc":
+        return False
+    if any(token in venue for token in ("press", "university", "house", "dictionary", "christendom")):
+        return True
+    return any(token in title for token in ("dictionary", "history", "world", "universe", "record"))
 
 
 def _normalize_pmid(value: str) -> str:

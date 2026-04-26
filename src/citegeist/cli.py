@@ -173,6 +173,13 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve", help="Enrich stored entries from external metadata sources")
     resolve_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
 
+    enrich_oa_parser = subparsers.add_parser(
+        "enrich-oa",
+        help="Enrich DOI-bearing entries with Unpaywall OA link metadata",
+    )
+    enrich_oa_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
+    enrich_oa_parser.add_argument("--email", help="Email address required by the Unpaywall API")
+
     resolve_stubs_parser = subparsers.add_parser(
         "resolve-stubs",
         help="Find and enrich stub-like stored entries, optionally limited to DOI-bearing candidates",
@@ -237,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     expand_parser.add_argument("citation_keys", nargs="+", help="Seed citation keys to expand")
     expand_parser.add_argument(
         "--source",
-        choices=["crossref", "openalex"],
+        choices=["crossref", "openalex", "opencitations"],
         default="crossref",
         help="Graph expansion source",
     )
@@ -260,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     expand_topic_parser.add_argument(
         "--source",
-        choices=["crossref", "openalex"],
+        choices=["crossref", "openalex", "opencitations"],
         default="openalex",
         help="Topic graph expansion source",
     )
@@ -749,6 +756,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
+        if args.command == "enrich-oa":
+            return _run_enrich_oa(store, args.citation_keys, args.email)
         if args.command == "resolve-stubs":
             return _run_resolve_stubs(store, args.limit, args.doi_only, args.all_misc, args.topic, args.preview)
         if args.command == "graph":
@@ -1215,6 +1224,72 @@ def _run_resolve(store: BibliographyStore, citation_keys: list[str]) -> int:
     return exit_code
 
 
+def _run_enrich_oa(store: BibliographyStore, citation_keys: list[str], email: str | None) -> int:
+    from .sources import UnpaywallSource
+
+    source = UnpaywallSource(config={"email": email} if email else {})
+    if not source.is_available():
+        print("Unpaywall enrichment requires --email or UNPAYWALL_EMAIL", file=sys.stderr)
+        return 1
+
+    results: list[dict[str, object]] = []
+    total = len(citation_keys)
+    for index, citation_key in enumerate(citation_keys, start=1):
+        _print_progress("enriching OA", index, total, citation_key)
+        existing = store.get_entry(citation_key)
+        if existing is None:
+            results.append({"citation_key": citation_key, "status": "missing"})
+            continue
+        doi = str(existing.get("doi") or "").strip()
+        if not doi:
+            results.append({"citation_key": citation_key, "status": "no_doi"})
+            continue
+
+        enriched = source.lookup_by_doi(doi)
+        if enriched is None:
+            results.append({"citation_key": citation_key, "status": "no_record", "doi": doi})
+            continue
+
+        merged_fields: dict[str, str] = {}
+        for key, value in existing.items():
+            if isinstance(value, str):
+                merged_fields[key] = value
+        merged_fields.update(enriched.fields)
+
+        for field_name in ("title", "year", "author", "journal", "booktitle", "publisher", "abstract", "keywords"):
+            existing_value = str(existing.get(field_name) or "").strip()
+            if existing_value:
+                merged_fields[field_name] = existing_value
+
+        replacement = BibEntry(
+            entry_type=str(existing.get("entry_type") or "misc"),
+            citation_key=citation_key,
+            fields=merged_fields,
+        )
+        store.replace_entry(
+            citation_key,
+            replacement,
+            source_type="oa_enrich",
+            source_label=f"unpaywall:doi:{doi}",
+            review_status=str(existing.get("review_status") or "enriched"),
+        )
+        updated = store.get_entry(citation_key) or {}
+        results.append(
+            {
+                "citation_key": citation_key,
+                "status": "enriched",
+                "doi": doi,
+                "is_oa": updated.get("is_oa"),
+                "oa_status": updated.get("oa_status"),
+                "best_oa_url": updated.get("best_oa_url"),
+                "best_oa_pdf_url": updated.get("best_oa_pdf_url"),
+            }
+        )
+
+    print(json.dumps(results, indent=2))
+    return 0
+
+
 def _resolve_one(store: BibliographyStore, resolver: MetadataResolver, citation_key: str) -> bool:
     existing = store.get_entry(citation_key)
     if existing is None:
@@ -1659,6 +1734,15 @@ def _run_expand(
         expand_fn = lambda key: expander.expand_entry_references(store, key)
     elif source == "openalex":
         expander = OpenAlexExpander()
+        expand_fn = lambda key: [
+            item
+            for relation_name in _expand_relation_types(relation)
+            for item in expander.expand_entry(store, key, relation_type=relation_name, limit=limit)
+        ]
+    elif source == "opencitations":
+        from .expand import OpenCitationsExpander
+
+        expander = OpenCitationsExpander()
         expand_fn = lambda key: [
             item
             for relation_name in _expand_relation_types(relation)

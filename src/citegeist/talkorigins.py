@@ -138,6 +138,7 @@ class TalkOriginsEnrichmentResult:
     applied: bool
     source_label: str = ""
     weak_reasons_after: list[str] | None = None
+    resolution_attempts: list[dict[str, object]] | None = None
     conflicts: list[dict[str, str]] | None = None
     error: str = ""
 
@@ -545,9 +546,29 @@ class TalkOriginsScraper:
             if not weak_reasons_before:
                 continue
             resolution = None
+            attempts: list[dict[str, object]] = []
             error = ""
             try:
-                resolution = self.resolver.resolve_entry(canonical)
+                resolver_with_trace = getattr(self.resolver, "resolve_entry_with_trace", None)
+                resolver_plain = getattr(self.resolver, "resolve_entry", None)
+                plain_func = getattr(resolver_plain, "__func__", None)
+                trace_func = getattr(resolver_with_trace, "__func__", None)
+                use_trace = (
+                    resolver_with_trace is not None
+                    and (
+                        trace_func is None
+                        or (
+                            plain_func is MetadataResolver.resolve_entry
+                            and trace_func is MetadataResolver.resolve_entry_with_trace
+                        )
+                    )
+                )
+                if use_trace:
+                    outcome = self.resolver.resolve_entry_with_trace(canonical)
+                    resolution = outcome.resolution
+                    attempts = [asdict(attempt) for attempt in outcome.attempts]
+                else:
+                    resolution = self.resolver.resolve_entry(canonical)
             except Exception as exc:
                 error = str(exc)
 
@@ -559,6 +580,7 @@ class TalkOriginsScraper:
                 applied=False,
                 source_label=resolution.source_label if resolution is not None else "",
                 error=error,
+                resolution_attempts=attempts,
             )
 
             if resolution is not None:

@@ -530,6 +530,88 @@ def test_talkorigins_enrich_weak_canonicals_can_preview_resolution(tmp_path: Pat
     assert results[0].weak_reasons_after == []
 
 
+def test_talkorigins_enrich_weak_canonicals_includes_resolution_attempts(tmp_path: Path):
+    base_url = "https://www.talkorigins.org/origins/biblio/"
+    scraper = TalkOriginsScraper(
+        source_client=FakeSourceClient(
+            {
+                base_url: INDEX_HTML,
+                f"{base_url}abiogenesis.html": ABIOGENESIS_HTML,
+                f"{base_url}evolution.html": EVOLUTION_HTML,
+            }
+        )
+    )
+
+    export = scraper.scrape_to_directory(base_url=base_url, output_dir=tmp_path)
+    Path(export.seed_sets[0].seed_bib).write_text(
+        """
+@misc{weak1,
+    author = "Smith, Jane",
+    year = "1999",
+    title = "Weak Duplicate"
+}
+
+@misc{weak2,
+    author = "Smith, Jane",
+    year = "1999",
+    title = "Weak Duplicate",
+    note = "Copied from legacy source"
+}
+""",
+        encoding="utf-8",
+    )
+    Path(export.seed_sets[1].seed_bib).write_text("", encoding="utf-8")
+
+    from citegeist.resolve import Resolution, ResolutionAttempt, ResolutionOutcome
+
+    scraper.resolver.resolve_entry_with_trace = lambda entry: ResolutionOutcome(  # type: ignore[method-assign]
+        resolution=Resolution(
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="resolved",
+                fields={
+                    "author": entry.fields["author"],
+                    "title": entry.fields["title"],
+                    "year": entry.fields["year"],
+                    "doi": "10.1000/weak",
+                    "journal": "Journal of Better Metadata",
+                },
+            ),
+            source_type="resolver",
+            source_label="crossref:search:Weak Duplicate",
+        ),
+        attempts=[
+            ResolutionAttempt(
+                source_name="crossref",
+                strategy="title_search",
+                query_value="Weak Duplicate",
+                matched=True,
+                candidate_count=1,
+                source_label="crossref:search:Weak Duplicate",
+            )
+        ],
+    )
+
+    store = BibliographyStore()
+    try:
+        results = scraper.enrich_weak_canonicals(export.manifest_path, store, apply=False)
+    finally:
+        store.close()
+
+    assert len(results) == 1
+    assert results[0].resolution_attempts == [
+        {
+            "source_name": "crossref",
+            "strategy": "title_search",
+            "query_value": "Weak Duplicate",
+            "matched": True,
+            "candidate_count": 1,
+            "source_label": "crossref:search:Weak Duplicate",
+            "error": "",
+        }
+    ]
+
+
 def test_talkorigins_enrich_weak_canonicals_can_apply_to_store(tmp_path: Path):
     base_url = "https://www.talkorigins.org/origins/biblio/"
     scraper = TalkOriginsScraper(
@@ -799,6 +881,7 @@ def test_talkorigins_build_review_export_combines_cluster_and_enrichment(tmp_pat
     assert review.items[0]["canonical"]["citation_key"] == "weak2"
     assert review.items[0]["enrichment"]["resolved"] is True
     assert review.items[0]["enrichment"]["applied"] is False
+    assert review.items[0]["enrichment"]["resolution_attempts"] == []
 
 
 def test_talkorigins_apply_review_corrections_updates_store_entry(tmp_path: Path):

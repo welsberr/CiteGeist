@@ -9,6 +9,7 @@ from urllib.parse import quote, urlencode
 from .bibtex import BibEntry, parse_bibtex
 from .extract import _extract_thesis_like_title, _looks_like_citation_blob as _shared_looks_like_citation_blob
 from .resolve import MetadataResolver, merge_entries
+from .sources import OpenCitationsSource
 from .storage import BibliographyStore
 
 
@@ -219,14 +220,94 @@ class OpenAlexExpander:
         return _normalize_openalex_id(results[0].get("id", ""))
 
 
+class OpenCitationsExpander:
+    def __init__(self, resolver: MetadataResolver | None = None, source: OpenCitationsSource | None = None) -> None:
+        self.resolver = resolver or MetadataResolver()
+        self.source = source or OpenCitationsSource(config={"source_client": self.resolver.source_client})
+
+    def expand_entry(
+        self,
+        store: BibliographyStore,
+        citation_key: str,
+        relation_type: str = "cites",
+        limit: int = 25,
+    ) -> list[ExpansionResult]:
+        entry = store.get_entry(citation_key)
+        if entry is None:
+            return []
+
+        doi = str(entry.get("doi") or "")
+        if not doi:
+            return []
+
+        edges = self.source.get_citations(doi, relation_type=relation_type, limit=limit)
+        results: list[ExpansionResult] = []
+        for edge in edges:
+            discovered_doi = edge.target_work_id[4:] if relation_type == "cites" else edge.source_work_id[4:]
+            discovered = self._lookup_discovered_entry(discovered_doi)
+            if discovered is None:
+                discovered = _opencitations_stub_entry(discovered_doi, citation_key)
+
+            existing_key = _existing_entry_key_for_discovered_work(store, discovered)
+            target_key = existing_key or discovered.citation_key
+            created = False
+            if existing_key is None and store.get_entry(discovered.citation_key) is None:
+                store.upsert_entry(
+                    discovered,
+                    raw_bibtex=None,
+                    source_type="graph_expand",
+                    source_label=edge.source_label,
+                    review_status="draft",
+                )
+                store.connection.commit()
+                created = True
+
+            if relation_type == "cites":
+                source_key = citation_key
+                relation_target_key = target_key
+            else:
+                source_key = target_key
+                relation_target_key = citation_key
+
+            store.add_relation(
+                source_key,
+                relation_target_key,
+                "cites",
+                source_type="graph_expand",
+                source_label=edge.source_label,
+                confidence=edge.confidence,
+            )
+            results.append(
+                ExpansionResult(
+                    source_citation_key=source_key,
+                    discovered_citation_key=target_key,
+                    created_entry=created,
+                    relation_type=relation_type,
+                    source_label=edge.source_label,
+                )
+            )
+        return results
+
+    def _lookup_discovered_entry(self, doi: str) -> BibEntry | None:
+        resolution = self.resolver.resolve_doi(doi)
+        if resolution is not None:
+            return resolution.entry
+        resolution = self.resolver.resolve_datacite_doi(doi)
+        if resolution is not None:
+            return resolution.entry
+        return self.source.lookup_by_doi(doi)
+
+
 class TopicExpander:
     def __init__(
         self,
         crossref_expander: CrossrefExpander | None = None,
         openalex_expander: OpenAlexExpander | None = None,
+        opencitations_expander: OpenCitationsExpander | None = None,
     ) -> None:
         self.crossref_expander = crossref_expander or CrossrefExpander()
         self.openalex_expander = openalex_expander or OpenAlexExpander()
+        self.opencitations_expander = opencitations_expander or OpenCitationsExpander()
         self.last_run_meta: dict[str, object] = {}
 
     def expand_topic(
@@ -362,6 +443,17 @@ class TopicExpander:
     ) -> list[tuple[ExpansionResult, dict[str, object] | None]]:
         if source == "crossref":
             expansion_rows = self.crossref_expander.expand_entry_references(store, citation_key)
+        elif source == "opencitations":
+            expansion_rows = []
+            for relation_name in _expand_relation_types(relation_type):
+                expansion_rows.extend(
+                    self.opencitations_expander.expand_entry(
+                        store,
+                        citation_key,
+                        relation_type=relation_name,
+                        limit=limit,
+                    )
+                )
         else:
             expansion_rows: list[ExpansionResult] = []
             for relation_name in _expand_relation_types(relation_type):
@@ -385,6 +477,11 @@ class TopicExpander:
     ) -> list[tuple[ExpansionResult, dict[str, object]]]:
         if source == "crossref":
             return self._preview_crossref_discoveries(store, citation_key, limit)
+        if source == "opencitations":
+            rows: list[tuple[ExpansionResult, dict[str, object]]] = []
+            for relation_name in _expand_relation_types(relation_type):
+                rows.extend(self._preview_opencitations_discoveries(store, citation_key, relation_name, limit))
+            return rows
         rows: list[tuple[ExpansionResult, dict[str, object]]] = []
         for relation_name in _expand_relation_types(relation_type):
             rows.extend(self._preview_openalex_discoveries(store, citation_key, relation_name, limit))
@@ -461,6 +558,40 @@ class TopicExpander:
                         created_entry=existing_key is None and store.get_entry(discovered.citation_key) is None,
                         relation_type=relation_type,
                         source_label=f"openalex:{relation_type}:{openalex_id}",
+                    ),
+                    dict(discovered.fields),
+                )
+            )
+        return rows
+
+    def _preview_opencitations_discoveries(
+        self,
+        store: BibliographyStore,
+        citation_key: str,
+        relation_type: str,
+        limit: int,
+    ) -> list[tuple[ExpansionResult, dict[str, object]]]:
+        entry = store.get_entry(citation_key)
+        if entry is None or not entry.get("doi"):
+            return []
+        doi = str(entry["doi"])
+        edges = self.opencitations_expander.source.get_citations(doi, relation_type=relation_type, limit=limit)
+        rows: list[tuple[ExpansionResult, dict[str, object]]] = []
+        for edge in edges:
+            discovered_doi = edge.target_work_id[4:] if relation_type == "cites" else edge.source_work_id[4:]
+            discovered = self.opencitations_expander._lookup_discovered_entry(discovered_doi)
+            if discovered is None:
+                discovered = _opencitations_stub_entry(discovered_doi, citation_key)
+            existing_key = _existing_entry_key_for_discovered_work(store, discovered)
+            target_key = existing_key or discovered.citation_key
+            rows.append(
+                (
+                    ExpansionResult(
+                        source_citation_key=citation_key if relation_type == "cites" else target_key,
+                        discovered_citation_key=target_key,
+                        created_entry=existing_key is None and store.get_entry(discovered.citation_key) is None,
+                        relation_type=relation_type,
+                        source_label=edge.source_label,
                     ),
                     dict(discovered.fields),
                 )
@@ -565,6 +696,20 @@ def _reference_citation_key(reference: dict, title: str, year: str, ordinal: int
     family = re.sub(r"[^A-Za-z0-9]+", "", family).lower() or "ref"
     first_word = re.sub(r"[^A-Za-z0-9]+", "", title.split()[0]).lower() if title.split() else "untitled"
     return f"{family}{year or 'nd'}{first_word}{ordinal}"
+
+
+def _opencitations_stub_entry(doi: str, source_citation_key: str) -> BibEntry:
+    suffix = re.sub(r"[^A-Za-z0-9]+", "", doi).lower()
+    return BibEntry(
+        entry_type="misc",
+        citation_key=f"doi{suffix}",
+        fields={
+            "title": f"Referenced work for DOI {doi}",
+            "doi": doi,
+            "url": f"https://doi.org/{doi}",
+            "note": f"discovered_from = {{{source_citation_key}}}",
+        },
+    )
 
 
 def _normalize_text(value: str) -> str:
