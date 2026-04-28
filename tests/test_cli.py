@@ -41,9 +41,12 @@ SAMPLE_BIB = """
 
 def run_cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     database = tmp_path / "library.sqlite3"
+    python = Path(__file__).resolve().parents[1] / ".venv/bin/python"
+    if not python.exists():
+        python = Path(sys.executable)
     env = {"PYTHONPATH": "src"}
     return subprocess.run(
-        [sys.executable, "-m", "citegeist", "--db", str(database), *args],
+        [str(python), "-m", "citegeist", "--db", str(database), *args],
         cwd=Path(__file__).resolve().parents[1],
         env=env,
         capture_output=True,
@@ -1679,6 +1682,45 @@ def test_cli_export_topic(tmp_path: Path):
     assert result.returncode == 0
     exported = export_path.read_text(encoding="utf-8")
     assert "@article{seed2024," in exported
+
+
+def test_cli_export_notebook_topic_bundle(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        """
+@article{seed2024,
+  author = {Seed, Alice},
+  title = {Graph Topic Result},
+  year = {2024}
+}
+""",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    from citegeist.storage import BibliographyStore
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "seed2024",
+            topic_slug="graph-topic",
+            topic_name="Graph Topic",
+            source_label="seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    output_dir = tmp_path / "notebook-export"
+    result = run_cli(tmp_path, "export-notebook-topic", "graph-topic", "--output-dir", str(output_dir))
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["bundle"]["bundle_kind"] == "notebook_topic_bibliography_bundle"
+    assert (output_dir / "notebook_topic_bundle.json").exists()
+    assert (output_dir / "notebook_topic_bibliography.bib").exists()
+    assert "@article{seed2024," in (output_dir / "notebook_topic_bibliography.bib").read_text(encoding="utf-8")
 
 
 def test_cli_export_topic_skips_stub_entries_by_default(tmp_path: Path):

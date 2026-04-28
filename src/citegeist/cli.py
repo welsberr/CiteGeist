@@ -12,6 +12,7 @@ from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
+from .notebook_export import export_notebook_topic_bundle
 from .extract import (
     available_extraction_backends,
     check_extraction_comparison_summary,
@@ -693,6 +694,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include DOI-only placeholder records in the topic export",
     )
 
+    export_notebook_topic_parser = subparsers.add_parser(
+        "export-notebook-topic",
+        help="Export a Notebook-ready bibliography bundle for one topic",
+    )
+    export_notebook_topic_parser.add_argument("topic_slug", help="Topic slug to export")
+    export_notebook_topic_parser.add_argument("--output-dir", required=True, help="Directory to write the Notebook bundle")
+    export_notebook_topic_parser.add_argument(
+        "--include-stubs",
+        action="store_true",
+        help="Include DOI-only placeholder records in the Notebook bibliography",
+    )
+
     return parser
 
 
@@ -912,6 +925,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_topic_entries(store, args.topic_slug, args.limit)
         if args.command == "export-topic":
             return _run_export_topic(store, args.topic_slug, args.output, args.include_stubs)
+        if args.command == "export-notebook-topic":
+            return _run_export_notebook_topic(store, args.topic_slug, args.output_dir, args.include_stubs)
     finally:
         store.close()
 
@@ -2334,4 +2349,14 @@ def _run_export_topic(store: BibliographyStore, topic_slug: str, output: str | N
     else:
         if rendered:
             print(rendered)
+    return 0
+
+
+def _run_export_notebook_topic(store: BibliographyStore, topic_slug: str, output_dir: str, include_stubs: bool) -> int:
+    try:
+        payload = export_notebook_topic_bundle(store.path, topic_slug, output_dir, include_stubs=include_stubs)
+    except KeyError:
+        print(f"Topic not found: {topic_slug}", file=sys.stderr)
+        return 1
+    print(json.dumps(payload, indent=2))
     return 0

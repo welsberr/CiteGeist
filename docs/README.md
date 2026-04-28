@@ -31,6 +31,7 @@ This documentation therefore emphasizes:
 1. Crossref, OpenAlex, PubMed, Europe PMC, Semantic Scholar, DataCite, DBLP, arXiv, and OAI-PMH are already in play.
 2. OpenCitations and Unpaywall are now integrated as source-layer additions.
 3. The SQLite-based local workflow remains the baseline.
+4. Notebook-ready topic bibliography bundles can now be exported with `export-notebook-topic` for downstream `Didactopus`/Notebook use.
 
 ### Recommended Next Sources
 1. OpenAIRE only if repository-acquisition scope expands
