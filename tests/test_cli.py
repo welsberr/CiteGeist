@@ -250,6 +250,54 @@ def test_cli_verify_bib_outputs_json(tmp_path: Path):
     assert payload[0]["entry"]["citation_key"] == "candidate2024"
 
 
+def test_cli_support_claims_outputs_json(tmp_path: Path):
+    input_path = tmp_path / "claims.txt"
+    input_path.write_text(
+        """
+This is a long claim about digital organisms evolving intelligent movement strategies in open-ended environments [1].
+
+References
+
+[[1]]Existing cited paper
+""",
+        encoding="utf-8",
+    )
+
+    with patch("citegeist.cli.analyze_support_gaps") as mocked_analyze:
+        mocked_analyze.return_value = {
+            "claim_count": 1,
+            "existing_reference_count": 1,
+            "suggestion_count": 1,
+            "suggestions": [
+                {
+                    "claim_text": "This is a long claim.",
+                    "existing_citation_markers": ["1"],
+                    "existing_reference_titles": ["Existing cited paper"],
+                    "suggested_references": [{"citation_key": "support2024", "title": "Support Paper"}],
+                    "note": None,
+                }
+            ],
+        }
+
+        stdout_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer):
+            exit_code = main(
+                [
+                    "--db",
+                    str(tmp_path / "library.sqlite3"),
+                    "support-claims",
+                    str(input_path),
+                    "--context",
+                    "artificial life",
+                ]
+            )
+
+    assert exit_code == 0
+    payload = json.loads(stdout_buffer.getvalue())
+    assert payload["suggestion_count"] == 1
+    assert payload["suggestions"][0]["suggested_references"][0]["citation_key"] == "support2024"
+
+
 def test_cli_verify_rejects_incomplete_llm_config(tmp_path: Path):
     stderr_buffer = io.StringIO()
     with redirect_stderr(stderr_buffer):

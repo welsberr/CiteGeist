@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
+from .claim_support import analyze_support_gaps
 from .expand import TopicExpander
 from .extract import extract_references
 from .storage import BibliographyStore
@@ -42,6 +43,7 @@ class LiteratureExplorerApi:
                 "expand_topic",
                 "extract_text",
                 "verify_strings",
+                "support_claims",
                 "graph",
             ],
             "preview_operations": ["bootstrap", "expand_topic"],
@@ -215,6 +217,26 @@ class LiteratureExplorerApi:
             "context": context,
             "results": [_verification_payload(result) for result in results],
         }
+
+    def support_claims(
+        self,
+        text: str,
+        *,
+        context: str = "",
+        limit: int = 5,
+        max_claims: int = 8,
+        min_claim_chars: int = 90,
+    ) -> dict[str, object]:
+        payload = analyze_support_gaps(
+            text,
+            verifier=self.verifier,
+            context=context,
+            limit=limit,
+            max_claims=max_claims,
+            min_claim_chars=min_claim_chars,
+        )
+        payload["context"] = context
+        return payload
 
     def verify_bibtex(self, bibtex_text: str, *, context: str = "", limit: int = 5) -> dict[str, object]:
         entries = parse_bibtex(bibtex_text)

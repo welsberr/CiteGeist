@@ -10,6 +10,7 @@ from pathlib import Path
 from .batch import BatchBootstrapRunner, load_batch_jobs
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
+from .claim_support import analyze_support_gaps
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
 from .notebook_export import export_notebook_topic_bundle
@@ -170,6 +171,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format for verification results",
     )
     verify_parser.add_argument("--output", help="Write verification results to a file instead of stdout")
+
+    support_claims_parser = subparsers.add_parser(
+        "support-claims",
+        help="Suggest additional supporting references for claim-like sentences in a text",
+    )
+    support_claims_parser.add_argument("input", help="Text file to analyze")
+    support_claims_parser.add_argument("--context", default="", help="Optional topic context used for scoring")
+    support_claims_parser.add_argument("--limit", type=int, default=5, help="Maximum candidates to inspect per claim")
+    support_claims_parser.add_argument("--max-claims", type=int, default=8, help="Maximum claim-like sentences to inspect")
+    support_claims_parser.add_argument(
+        "--min-claim-chars",
+        type=int,
+        default=90,
+        help="Minimum sentence length to consider as a claim candidate",
+    )
+    support_claims_parser.add_argument("--output", help="Write JSON results to a file instead of stdout")
 
     resolve_parser = subparsers.add_parser("resolve", help="Enrich stored entries from external metadata sources")
     resolve_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
@@ -767,6 +784,15 @@ def main(argv: list[str] | None = None) -> int:
                 llm_provider=args.llm_provider,
                 llm_role=args.llm_role,
             )
+        if args.command == "support-claims":
+            return _run_support_claims(
+                Path(args.input),
+                args.context,
+                args.limit,
+                args.max_claims,
+                args.min_claim_chars,
+                args.output,
+            )
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
         if args.command == "enrich-oa":
@@ -1214,6 +1240,32 @@ def _run_verify(
     else:
         if rendered:
             print(rendered)
+    return 0
+
+
+def _run_support_claims(
+    input_path: Path,
+    context: str,
+    limit: int,
+    max_claims: int,
+    min_claim_chars: int,
+    output: str | None,
+) -> int:
+    text = input_path.read_text(encoding="utf-8")
+    verifier = BibliographyVerifier()
+    payload = analyze_support_gaps(
+        text,
+        verifier=verifier,
+        context=context,
+        limit=limit,
+        max_claims=max_claims,
+        min_claim_chars=min_claim_chars,
+    )
+    rendered = json.dumps(payload, indent=2)
+    if output:
+        Path(output).write_text(rendered + "\n", encoding="utf-8")
+    else:
+        print(rendered)
     return 0
 
 

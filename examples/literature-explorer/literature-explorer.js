@@ -30,6 +30,9 @@ export function createLiteratureExplorerClient(bridge) {
     verifyStrings(values, options = {}) {
       return bridge.call("verify_strings", { values, ...options });
     },
+    supportClaims(text, options = {}) {
+      return bridge.call("support_claims", { text, ...options });
+    },
     verifyBibtex(bibtexText, options = {}) {
       return bridge.call("verify_bibtex", { bibtex_text: bibtexText, ...options });
     },

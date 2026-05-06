@@ -209,6 +209,15 @@ Status:
 Early but serviceable. SQLite FTS covers the basic local-search path, but retrieval benchmarking, saved search workflows, and optional semantic ranking remain future work.
 
 Note:
+The new `support-claims` feature is an early bridge from bibliography work into
+claim-oriented literature assistance. Its current scope is intentionally narrow:
+segment citation-bearing claim sentences from a text excerpt, parse already
+listed references when possible, and suggest additional candidate support using
+the existing verifier/resolver stack. The next quality steps are better claim
+segmentation, stronger deduping against already-used sources, and UI review
+surfaces for per-claim suggestions.
+
+Note:
 The repository now has a small app-facing JSON adapter surface, a lightweight local HTTP bridge, and a static literature-explorer demo shell. That is enough for a browser or desktop-web shell to drive topic discovery, topic expansion, extraction, verification, entry inspection, and lightweight graph exploration against one local database. It is still a demo boundary rather than a full multi-user application or long-running service architecture.
 
 Near-term follow-up for this demo surface:

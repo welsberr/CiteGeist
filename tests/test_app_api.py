@@ -3,6 +3,7 @@ from citegeist.app_api import LiteratureExplorerApi
 from citegeist.bibtex import BibEntry
 from citegeist.bootstrap import BootstrapResult
 from citegeist.expand import ExpansionResult
+from citegeist.verify import VerificationMatch, VerificationResult
 
 
 class FakeBootstrapper:
@@ -80,6 +81,38 @@ class FakeTopicExpander:
         ]
 
 
+class FakeVerifier:
+    def verify_strings(self, values, context="", limit=5):
+        return []
+
+    def verify_string(self, value: str, context: str = "", limit: int = 5):
+        return VerificationResult(
+            query=value,
+            context=context,
+            status="high_confidence",
+            confidence=0.88,
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="support2024",
+                fields={"title": "Support Paper", "year": "2024"},
+            ),
+            source_label="openalex:search:Support Paper",
+            alternates=[
+                VerificationMatch(
+                    entry=BibEntry(
+                        entry_type="article",
+                        citation_key="alt2023",
+                        fields={"title": "Alternate Support", "year": "2023"},
+                    ),
+                    score=0.66,
+                    source_label="crossref:search:Alternate Support",
+                )
+            ],
+            input_type="string",
+            input_key=None,
+        )
+
+
 def test_literature_explorer_api_search_and_show_entry():
     store = BibliographyStore()
     try:
@@ -119,6 +152,33 @@ def test_literature_explorer_api_capabilities_distinguish_metadata_and_expansion
         assert payload["graph_expansion_sources"] == ["crossref", "openalex"]
         assert payload["topic_expansion_sources"] == ["crossref", "openalex"]
         assert payload["graph_relation_types"] == ["cites", "cited_by", "both"]
+        assert "support_claims" in payload["operations"]
+    finally:
+        store.close()
+
+
+def test_literature_explorer_api_support_claims_returns_suggestions():
+    store = BibliographyStore()
+    try:
+        api = LiteratureExplorerApi(store, verifier=FakeVerifier())
+        payload = api.support_claims(
+            """
+Long claim text about agents evolving intelligent movement strategies in multiple computational settings without enough direct support [1].
+
+References
+
+[[1]]Earlier Cited Paper
+"""
+        ,
+            context="artificial life",
+            limit=3,
+            max_claims=2,
+            min_claim_chars=40,
+        )
+
+        assert payload["context"] == "artificial life"
+        assert payload["suggestion_count"] == 1
+        assert payload["suggestions"][0]["suggested_references"][0]["citation_key"] == "support2024"
     finally:
         store.close()
 

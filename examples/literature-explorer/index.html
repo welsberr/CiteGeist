@@ -405,6 +405,62 @@
       color: var(--ink);
     }
 
+    .claim-stack {
+      display: grid;
+      gap: 0.85rem;
+    }
+
+    .claim-card {
+      padding: 0.95rem 1rem;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(73, 57, 35, 0.11);
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .claim-score {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: #6b230f;
+      background: #f4dfd3;
+      border: 1px solid rgba(141, 63, 45, 0.16);
+      border-radius: 999px;
+      padding: 0.3rem 0.62rem;
+      width: fit-content;
+    }
+
+    .claim-text {
+      color: var(--ink);
+      line-height: 1.5;
+    }
+
+    .claim-note {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .claim-ref-list {
+      display: grid;
+      gap: 0.55rem;
+    }
+
+    .claim-ref {
+      padding: 0.75rem 0.85rem;
+      border-radius: 14px;
+      background: rgba(245, 239, 229, 0.68);
+      border: 1px solid rgba(73, 57, 35, 0.09);
+    }
+
+    .claim-ref strong {
+      display: block;
+      margin-bottom: 0.15rem;
+    }
+
     .endpoint-card {
       border-radius: 18px;
       border: 1px solid rgba(73, 57, 35, 0.11);
@@ -641,6 +697,31 @@
             <button id="verify-button" class="secondary">Verify String</button>
           </div>
         </section>
+
+        <section class="panel card">
+          <h2>Claim Support</h2>
+          <label>
+            Claim-Like Excerpt
+            <textarea id="claim-support-text">Computational research touching on movement of agents spans many different fields. Movement may not be modeled at all, but simply assigned a cost value, as in work in artificial neural systems applied to the traveling salesman problem [1]. Our research takes an approach at an intermediate level, seeking to elucidate how evolutionary processes can result in individual control of existing movement capabilities in order to intelligently exploit environmental resources.</textarea>
+          </label>
+          <div class="row-3">
+            <label>
+              Context
+              <input id="claim-support-context" value="artificial life" />
+            </label>
+            <label>
+              Max Claims
+              <input id="claim-support-max-claims" type="number" min="1" value="5" />
+            </label>
+            <label>
+              Min Claim Chars
+              <input id="claim-support-min-chars" type="number" min="20" value="80" />
+            </label>
+          </div>
+          <div class="toolbar">
+            <button id="claim-support-button" class="primary full">Suggest Support</button>
+          </div>
+        </section>
       </div>
     </aside>
 
@@ -694,6 +775,11 @@
           <h2>Extract / Verify Output</h2>
           <div id="extract-verify-output" class="empty">Extraction and verification results will appear here.</div>
         </section>
+      </section>
+
+      <section class="panel card">
+        <h2>Claim Support Review</h2>
+        <div id="claim-support-output" class="empty">Run claim support to rank support-worthy assertions and inspect suggested references.</div>
       </section>
 
       <section class="panel card">
@@ -796,6 +882,7 @@
       searchResults: document.getElementById("search-results"),
       graphOutput: document.getElementById("graph-output"),
       extractVerifyOutput: document.getElementById("extract-verify-output"),
+      claimSupportOutput: document.getElementById("claim-support-output"),
       activityLog: document.getElementById("activity-log"),
       metricTopicCount: document.getElementById("metric-topic-count"),
       metricEntryCount: document.getElementById("metric-entry-count"),
@@ -835,6 +922,11 @@
       extractText: document.getElementById("extract-text"),
       extractButton: document.getElementById("extract-button"),
       verifyButton: document.getElementById("verify-button"),
+      claimSupportText: document.getElementById("claim-support-text"),
+      claimSupportContext: document.getElementById("claim-support-context"),
+      claimSupportMaxClaims: document.getElementById("claim-support-max-claims"),
+      claimSupportMinChars: document.getElementById("claim-support-min-chars"),
+      claimSupportButton: document.getElementById("claim-support-button"),
     };
 
     els.serverUrl.value = state.bridgeUrl;
@@ -1055,6 +1147,45 @@
     function renderExtractVerify(payload) {
       els.extractVerifyOutput.className = "code-block";
       els.extractVerifyOutput.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function renderClaimSupport(payload) {
+      const suggestions = payload?.suggestions || [];
+      if (!suggestions.length) {
+        renderEmpty(els.claimSupportOutput, "No ranked support suggestions yet. Try a longer excerpt or a different context phrase.");
+        return;
+      }
+      els.claimSupportOutput.className = "claim-stack";
+      els.claimSupportOutput.innerHTML = `
+        <div class="summary-box">
+          <strong>Claim Support Summary</strong>
+          <p>${suggestions.length} ranked claims from ${payload.claim_count || 0} extracted candidates · ${payload.existing_reference_count || 0} parsed existing references.</p>
+          <p>Claims are ordered by <code>needs_support_score</code>, so uncited or under-supported assertions appear first.</p>
+        </div>
+        ${suggestions.map((suggestion) => `
+          <div class="claim-card">
+            <span class="claim-score">Needs Support ${Number(suggestion.needs_support_score ?? 0).toFixed(3)}</span>
+            <div class="claim-text">${escapeHtml(suggestion.claim_text || "")}</div>
+            <div class="pill-row">
+              ${(suggestion.existing_citation_markers || []).map((marker) => `<span class="pill">${escapeHtml(marker)}</span>`).join("") || '<span class="pill">no inline citations detected</span>'}
+            </div>
+            ${suggestion.note ? `<div class="claim-note">${escapeHtml(suggestion.note)}</div>` : ""}
+            <div class="claim-ref-list">
+              ${(suggestion.suggested_references || []).map((reference) => `
+                <div class="claim-ref">
+                  <strong>${escapeHtml(reference.title || reference.citation_key || "candidate")}</strong>
+                  <p>${escapeHtml(reference.authors || "Unknown authors")} · ${escapeHtml(reference.year || "n.d.")} · score ${Number(reference.score ?? 0).toFixed(3)}</p>
+                  <div class="pill-row">
+                    ${reference.journal ? `<span class="pill">${escapeHtml(reference.journal)}</span>` : ""}
+                    ${reference.doi ? `<span class="pill">${escapeHtml(reference.doi)}</span>` : ""}
+                    ${reference.source_label ? `<span class="pill">${escapeHtml(reference.source_label)}</span>` : ""}
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `).join("")}
+      `;
     }
 
     function renderExpandSummary(payload) {
@@ -1320,6 +1451,29 @@
       }
     }
 
+    async function runClaimSupport() {
+      if (!state.client) {
+        setStatus("Connect to the server first.", "error");
+        return;
+      }
+      setBusy(els.claimSupportButton, true);
+      try {
+        const payload = await state.client.supportClaims(els.claimSupportText.value, {
+          context: els.claimSupportContext.value.trim(),
+          limit: 5,
+          max_claims: Number(els.claimSupportMaxClaims.value || 5),
+          min_claim_chars: Number(els.claimSupportMinChars.value || 80),
+        });
+        renderClaimSupport(payload);
+        setLastOp("support_claims");
+        logActivity("support_claims", payload);
+      } catch (error) {
+        setStatus(String(error.message || error), "error");
+      } finally {
+        setBusy(els.claimSupportButton, false);
+      }
+    }
+
     async function exportTopicBibtex(topicSlug) {
       if (!state.client || !topicSlug) {
         setStatus("Connect to the server first.", "error");
@@ -1408,6 +1562,7 @@
     els.searchButton.addEventListener("click", runSearch);
     els.extractButton.addEventListener("click", runExtract);
     els.verifyButton.addEventListener("click", runVerify);
+    els.claimSupportButton.addEventListener("click", runClaimSupport);
   </script>
 </body>
 </html>

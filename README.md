@@ -51,6 +51,7 @@ The initial repo includes:
 - staged plaintext reference extraction that now preserves more structured metadata from legacy references, including year suffixes, identifiers, volume/issue/pages, and thesis/report/web-style venue hints;
 - a reference-extraction backend seam with the local `heuristic` parser as the default implementation, so optional external backends can be added later without changing the core extract workflow;
 - standalone verification and disambiguation of free-text references or partial BibTeX into auditable BibTeX/JSON results with `x_status`, `x_confidence`, `x_source`, `x_query`, and alternate-candidate traces;
+- a first-pass claim-support workflow that can scan citation-bearing claim sentences in a text excerpt and suggest additional supporting references not already parsed from the excerpt's reference list;
 - identifier-first metadata resolution for DOI, PMID/PubMed, OpenAlex, DBLP, arXiv, and DataCite-backed entries, with OpenAlex/DataCite/PubMed title-search fallback;
 - local citation-graph traversal over stored `cites`, `cited_by`, and `crossref` edges;
 - Crossref- and OpenAlex-backed graph expansion that materializes draft related works and edge provenance;
@@ -174,6 +175,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist compare-extract references.txt --ba
 PYTHONPATH=src .venv/bin/python -m citegeist verify --string '"Graph-first bibliography augmentation" Smith 2024' --context "citation graphs" --format json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --string 'Evans 1960' --context "bottlenose dolphin echolocation" --llm --llm-base-url http://localhost:11434 --llm-model qwen3 --llm-role both --format json
 PYTHONPATH=src .venv/bin/python -m citegeist verify --bib draft.bib --output verified.bib
+PYTHONPATH=src .venv/bin/python -m citegeist support-claims paper_excerpt.txt --context "artificial life"
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve smith2024graphs
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --preview --limit 25
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 resolve-stubs --doi-only --all-misc --limit 25

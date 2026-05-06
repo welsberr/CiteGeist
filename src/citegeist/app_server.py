@@ -94,6 +94,14 @@ class LiteratureExplorerAppServer:
                 context=str(params.get("context") or ""),
                 limit=int(params.get("limit", 5)),
             )
+        if method == "support_claims":
+            return self.api.support_claims(
+                str(params.get("text") or ""),
+                context=str(params.get("context") or ""),
+                limit=int(params.get("limit", 5)),
+                max_claims=int(params.get("max_claims", 8)),
+                min_claim_chars=int(params.get("min_claim_chars", 90)),
+            )
         if method == "verify_bibtex":
             return self.api.verify_bibtex(
                 str(params.get("bibtex_text") or ""),
