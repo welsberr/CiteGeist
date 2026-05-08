@@ -12,3 +12,6 @@ topic-*
 talkorigins-out/
 talkorigins.sqlite3
 to_batch.sh*
+transfer/
+evo-edu-*
+transitional-fossils-faq-draft.md
