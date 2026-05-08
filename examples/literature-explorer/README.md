@@ -42,6 +42,7 @@ The adapter exposes JSON-serializable methods suitable for a local web bridge:
 - `expand_topic(...)`
 - `extract_text(text, backend="heuristic")`
 - `verify_strings(values, context="", limit=5)`
+- `support_claims(text, context="", limit=5, max_claims=8, min_claim_chars=90)`
 - `verify_bibtex(bibtex_text, context="", limit=5)`
 - `graph(seed_keys, relation_types=None, depth=1, review_status=None, missing_only=False)`
 
@@ -64,6 +65,7 @@ window.citegeist = {
   expandTopic(topicSlug, opts) {},
   extractText(text, opts) {},
   verifyStrings(values, opts) {},
+  supportClaims(text, opts) {},
   verifyBibtex(bibtexText, opts) {},
   graph(seedKeys, opts) {}
 }
@@ -122,6 +124,7 @@ This is sufficient to drive a demonstration app that can:
 - preview or apply topic expansion;
 - inspect one entry with BibTeX/provenance details;
 - run rough-reference extraction and verification;
+- rank support-worthy claims in a prose excerpt and inspect suggested references;
 - render local citation neighborhoods from `graph()` JSON payloads.
 
 For a first demo, the strongest path is topic exploration rather than generic reference-manager behavior.

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from citegeist import BibliographyStore
 from citegeist.app_api import LiteratureExplorerApi
+from citegeist.bibtex import BibEntry
 from citegeist.bootstrap import BootstrapResult
 from citegeist.app_server import (
     LiteratureExplorerAppServer,
@@ -9,6 +10,7 @@ from citegeist.app_server import (
     _request_is_authorized,
     create_request_handler,
 )
+from citegeist.verify import VerificationMatch, VerificationResult
 
 
 class FakeBootstrapper:
@@ -27,6 +29,38 @@ class FakeBootstrapper:
                 year="2026",
             )
         ]
+
+
+class FakeVerifier:
+    def verify_strings(self, values, context="", limit=5):
+        return []
+
+    def verify_string(self, value: str, context: str = "", limit: int = 5):
+        return VerificationResult(
+            query=value,
+            context=context,
+            status="high_confidence",
+            confidence=0.88,
+            entry=BibEntry(
+                entry_type="article",
+                citation_key="support2024",
+                fields={"title": "Support Paper", "year": "2024"},
+            ),
+            source_label="openalex:search:Support Paper",
+            alternates=[
+                VerificationMatch(
+                    entry=BibEntry(
+                        entry_type="article",
+                        citation_key="alt2023",
+                        fields={"title": "Alternate Support", "year": "2023"},
+                    ),
+                    score=0.66,
+                    source_label="crossref:search:Alternate Support",
+                )
+            ],
+            input_type="string",
+            input_key=None,
+        )
 
 
 def test_literature_explorer_app_server_dispatch_search():
@@ -134,6 +168,35 @@ def test_literature_explorer_app_server_dispatch_bootstrap_with_new_caps():
         assert bootstrapper.calls[0]["expansion_mode"] == "cites"
         assert bootstrapper.calls[0]["max_expanded_entries"] == 75
         assert bootstrapper.calls[0]["max_expand_seconds"] == 12.5
+    finally:
+        store.close()
+
+
+def test_literature_explorer_app_server_dispatch_support_claims():
+    store = BibliographyStore()
+    try:
+        server = LiteratureExplorerAppServer(LiteratureExplorerApi(store, verifier=FakeVerifier()))
+
+        payload = server.dispatch(
+            "support_claims",
+            {
+                "text": """
+Long claim text about agents evolving intelligent movement strategies in multiple computational settings without enough direct support [1].
+
+References
+
+[[1]]Earlier Cited Paper
+""",
+                "context": "artificial life",
+                "limit": 3,
+                "max_claims": 2,
+                "min_claim_chars": 40,
+            },
+        )
+
+        assert payload["context"] == "artificial life"
+        assert payload["suggestion_count"] == 1
+        assert payload["suggestions"][0]["suggested_references"][0]["citation_key"] == "support2024"
     finally:
         store.close()
 

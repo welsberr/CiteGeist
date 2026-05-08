@@ -843,6 +843,23 @@
           </div>
           <div class="endpoint-card">
             <div class="endpoint-head">
+              <span class="endpoint-method">POST</span>
+              <span class="endpoint-path">/api/call support_claims</span>
+            </div>
+            <p>Analyze a prose excerpt for support-worthy claims, rank them by <code>needs_support_score</code>, and return candidate references not already parsed from the excerpt.</p>
+            <div class="code-block">{
+  "method": "support_claims",
+  "params": {
+    "text": "Movement may not be modeled at all, but simply assigned a cost value ...",
+    "context": "artificial life",
+    "limit": 5,
+    "max_claims": 5,
+    "min_claim_chars": 80
+  }
+}</div>
+          </div>
+          <div class="endpoint-card">
+            <div class="endpoint-head">
               <span class="endpoint-method">AUTH</span>
               <span class="endpoint-path">Bearer token</span>
             </div>
