@@ -114,3 +114,60 @@ References
     assert first["existing_citation_markers"] == []
     assert second["existing_citation_markers"] == ["1"]
     assert first["needs_support_score"] > second["needs_support_score"]
+
+
+def test_analyze_support_gaps_filters_existing_reference_dois():
+    class DoiVerifier(FakeVerifier):
+        def verify_string(self, value: str, context: str = "", limit: int = 5) -> VerificationResult:
+            self.queries.append(value)
+            return VerificationResult(
+                query=value,
+                context=context,
+                status="high_confidence",
+                confidence=0.91,
+                entry=BibEntry(
+                    entry_type="article",
+                    citation_key="dup2020support",
+                    fields={
+                        "title": "A Better Support Paper Retitled",
+                        "author": "Smith, Jane",
+                        "year": "2020",
+                        "doi": "10.1000/existing",
+                        "journal": "Journal of Better Support",
+                    },
+                ),
+                source_label="openalex:search:A Better Support Paper Retitled",
+                alternates=[
+                    VerificationMatch(
+                        entry=BibEntry(
+                            entry_type="article",
+                            citation_key="novel2021support",
+                            fields={
+                                "title": "A Different Support Paper",
+                                "author": "Doe, Alex",
+                                "year": "2021",
+                                "doi": "10.1000/new-distinct",
+                            },
+                        ),
+                        score=0.7,
+                        source_label="crossref:search:A Different Support Paper",
+                    )
+                ],
+                input_type="string",
+                input_key=None,
+            )
+
+    verifier = DoiVerifier()
+    text = """
+Computational research touching on movement of agents spans many different fields. Movement may not be modeled at all, but simply assigned a cost value, as in work in artificial neural systems applied to the traveling salesman problem [1].
+
+References
+
+[[1]]Existing cited paper
+doi: 10.1000/existing
+"""
+    payload = analyze_support_gaps(text, verifier=verifier, max_claims=3, min_claim_chars=40)
+    assert payload["suggestion_count"] == 1
+    suggested_titles = [item["title"] for item in payload["suggestions"][0]["suggested_references"]]
+    assert "A Better Support Paper Retitled" not in suggested_titles
+    assert "A Different Support Paper" in suggested_titles

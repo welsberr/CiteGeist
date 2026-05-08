@@ -15,6 +15,7 @@ AUTHOR_YEAR_INLINE_PATTERN = re.compile(
     r"\b([A-Z][A-Za-z'’.-]+(?:\s+(?:and|&|et al\.?))?(?:\s+[A-Z][A-Za-z'’.-]+)*)\s*\((\d{4}[a-z]?)\)"
 )
 REFERENCE_ENTRY_PATTERN = re.compile(r"^\s*\[\[(\d+)\]\]\s*(.+)$", re.MULTILINE)
+REFERENCE_BLOCK_PATTERN = re.compile(r"^\s*\[\[(\d+)\]\]\s*(.+?)(?=^\s*\[\[\d+\]\]|\Z)", re.MULTILINE | re.DOTALL)
 SENTENCE_SPLIT_PATTERN = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"\[])')
 SECTION_HEADER_PATTERN = re.compile(r"^(?:[IVX]+\.|[A-Z]\.)\s+[A-Z]")
 CONTINUATION_START_PATTERN = re.compile(
@@ -39,6 +40,7 @@ NON_CLAIM_START_PATTERN = re.compile(
     r"new references found)",
     re.IGNORECASE,
 )
+DOI_PATTERN = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -68,6 +70,12 @@ class ClaimCandidate:
     needs_support_score: float
 
 
+@dataclass(slots=True)
+class ExistingReference:
+    title: str
+    doi: str = ""
+
+
 def analyze_support_gaps(
     text: str,
     *,
@@ -79,15 +87,24 @@ def analyze_support_gaps(
 ) -> dict[str, object]:
     verifier = verifier or BibliographyVerifier()
     existing_references = _extract_existing_references(text)
-    existing_titles_normalized = {_normalize_title(title) for title in existing_references.values() if title}
+    existing_titles_normalized = {
+        _normalize_title(reference.title)
+        for reference in existing_references.values()
+        if reference.title
+    }
+    existing_dois_normalized = {
+        _normalize_doi(reference.doi)
+        for reference in existing_references.values()
+        if reference.doi
+    }
     claims = _extract_claim_candidates(text, max_claims=max_claims, min_claim_chars=min_claim_chars)
 
     suggestions: list[ClaimSupportSuggestion] = []
     for claim in claims:
         referenced_titles = [
-            existing_references[marker]
+            existing_references[marker].title
             for marker in claim.citation_markers
-            if marker in existing_references and existing_references[marker]
+            if marker in existing_references and existing_references[marker].title
         ]
         verification = verifier.verify_string(claim.text, context=context, limit=limit)
         candidates = [verification.entry, *[alt.entry for alt in verification.alternates]]
@@ -96,20 +113,36 @@ def analyze_support_gaps(
 
         rendered: list[dict[str, object]] = []
         seen_titles: set[str] = set()
+        seen_dois: set[str] = set()
+        seen_keys: set[str] = set()
         for entry, source_label, score in zip(candidates, sources, scores):
             title = str(entry.fields.get("title") or "").strip()
+            doi = str(entry.fields.get("doi") or "").strip()
             normalized_title = _normalize_title(title)
-            if not title or normalized_title in existing_titles_normalized or normalized_title in seen_titles:
+            normalized_doi = _normalize_doi(doi)
+            citation_key = str(entry.citation_key or "").strip()
+            normalized_key = citation_key.lower()
+            if not title:
+                continue
+            if normalized_title in existing_titles_normalized or normalized_title in seen_titles:
+                continue
+            if normalized_doi and (normalized_doi in existing_dois_normalized or normalized_doi in seen_dois):
+                continue
+            if normalized_key and normalized_key in seen_keys:
                 continue
             seen_titles.add(normalized_title)
+            if normalized_doi:
+                seen_dois.add(normalized_doi)
+            if normalized_key:
+                seen_keys.add(normalized_key)
             rendered.append(
                 {
-                    "citation_key": entry.citation_key,
+                    "citation_key": citation_key,
                     "entry_type": entry.entry_type,
                     "title": title,
                     "authors": str(entry.fields.get("author") or ""),
                     "year": str(entry.fields.get("year") or ""),
-                    "doi": str(entry.fields.get("doi") or ""),
+                    "doi": doi,
                     "journal": str(entry.fields.get("journal") or entry.fields.get("booktitle") or ""),
                     "source_label": source_label,
                     "score": round(float(score), 4),
@@ -223,15 +256,20 @@ def _should_merge_continuation(current: str, next_sentence: str, *, min_claim_ch
     return False
 
 
-def _extract_existing_references(text: str) -> dict[str, str]:
+def _extract_existing_references(text: str) -> dict[str, ExistingReference]:
     if "References" not in text:
         return {}
     _, _, tail = text.partition("References")
-    references: dict[str, str] = {}
-    for match in REFERENCE_ENTRY_PATTERN.finditer(tail):
+    references: dict[str, ExistingReference] = {}
+    for match in REFERENCE_BLOCK_PATTERN.finditer(tail):
         marker = match.group(1)
-        title = match.group(2).strip()
-        references[marker] = title
+        block = match.group(2).strip()
+        first_line = block.splitlines()[0].strip() if block else ""
+        doi_match = DOI_PATTERN.search(block)
+        references[marker] = ExistingReference(
+            title=first_line,
+            doi=doi_match.group(0) if doi_match else "",
+        )
     return references
 
 
@@ -288,6 +326,10 @@ def _score_claim_need(text: str) -> float:
 
 def _normalize_title(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _normalize_doi(value: str) -> str:
+    return value.strip().lower()
 
 
 def _build_note(markers: list[str], titles: list[str]) -> str | None:
