@@ -64,6 +64,7 @@ J. J. Hopfield, David W. Tank
     assert suggestion["existing_reference_titles"] == ["Neural computation of decisions in optimization problems"]
     assert suggestion["suggested_references"][0]["title"] == "A Better Support Paper"
     assert suggestion["needs_support_score"] > 0
+    assert suggestion["suggested_references"][0]["reason"].startswith("Top candidate match.")
     titles = [item["title"] for item in suggestion["suggested_references"]]
     assert "Neural computation of decisions in optimization problems" not in titles
 
@@ -171,3 +172,20 @@ doi: 10.1000/existing
     suggested_titles = [item["title"] for item in payload["suggestions"][0]["suggested_references"]]
     assert "A Better Support Paper Retitled" not in suggested_titles
     assert "A Different Support Paper" in suggested_titles
+
+
+def test_analyze_support_gaps_includes_reason_for_alternate_candidates():
+    verifier = FakeVerifier()
+    text = """
+Computational research touching on movement of agents spans many different fields. Movement strategies in artificial life systems can improve resource exploitation under selection pressures [1].
+
+References
+
+[[1]]Earlier Cited Paper
+"""
+    payload = analyze_support_gaps(text, verifier=verifier, max_claims=3, min_claim_chars=40)
+    suggestion = payload["suggestions"][0]
+    assert len(suggestion["suggested_references"]) == 2
+    primary, alternate = suggestion["suggested_references"]
+    assert "Top candidate match." in primary["reason"]
+    assert "Alternate candidate retained after verification." in alternate["reason"]

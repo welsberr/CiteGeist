@@ -41,6 +41,7 @@ NON_CLAIM_START_PATTERN = re.compile(
     re.IGNORECASE,
 )
 DOI_PATTERN = re.compile(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", re.IGNORECASE)
+TOKEN_PATTERN = re.compile(r"[a-z0-9]{4,}")
 
 
 @dataclass(slots=True)
@@ -146,6 +147,13 @@ def analyze_support_gaps(
                     "journal": str(entry.fields.get("journal") or entry.fields.get("booktitle") or ""),
                     "source_label": source_label,
                     "score": round(float(score), 4),
+                    "reason": _build_reference_reason(
+                        claim.text,
+                        title=title,
+                        journal=str(entry.fields.get("journal") or entry.fields.get("booktitle") or ""),
+                        source_label=source_label,
+                        is_primary=entry is verification.entry,
+                    ),
                 }
             )
 
@@ -330,6 +338,43 @@ def _normalize_title(value: str) -> str:
 
 def _normalize_doi(value: str) -> str:
     return value.strip().lower()
+
+
+def _build_reference_reason(
+    claim_text: str,
+    *,
+    title: str,
+    journal: str,
+    source_label: str,
+    is_primary: bool,
+) -> str:
+    claim_terms = _meaningful_tokens(claim_text)
+    title_terms = _meaningful_tokens(title)
+    journal_terms = _meaningful_tokens(journal)
+    overlap = sorted(claim_terms & title_terms)
+    overlap_preview = ", ".join(overlap[:3])
+
+    reasons: list[str] = []
+    reasons.append("Top candidate match." if is_primary else "Alternate candidate retained after verification.")
+    if overlap_preview:
+        reasons.append(f"Shares claim terms: {overlap_preview}.")
+    elif claim_terms & journal_terms:
+        reasons.append("Venue terms overlap with the claim topic.")
+    elif source_label.startswith("openalex:search:"):
+        reasons.append("Returned from topic-oriented OpenAlex search for this claim.")
+    elif source_label.startswith("crossref:search:"):
+        reasons.append("Returned from Crossref search for this claim.")
+    else:
+        reasons.append("Returned by the bibliography verifier for this claim.")
+    return " ".join(reasons)
+
+
+def _meaningful_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in TOKEN_PATTERN.findall(value.lower())
+        if token not in {"this", "that", "with", "from", "their", "there", "into", "about", "through", "using"}
+    }
 
 
 def _build_note(markers: list[str], titles: list[str]) -> str | None:
