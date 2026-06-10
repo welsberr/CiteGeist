@@ -10,6 +10,11 @@ CiteGeist should treat scaffold source slots as bibliography work orders. A sour
 4. Mark unresolved or weak support explicitly instead of filling the slot with a convenient citation.
 5. Return enough provenance for Notebook and Didactopus to show why the source belongs in the trail.
 
+Resolved slots should feed back into scaffold artifacts in a way that
+preserves review status and rationale. The goal is not just to "fill a field"
+but to improve the grounded source trail that Notebook and Didactopus expose to
+readers and learners.
+
 ## Preferred Slot Shape
 
 ```json

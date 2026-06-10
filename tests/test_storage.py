@@ -102,6 +102,26 @@ def test_store_export_skips_doi_only_stub_by_default():
         store.close()
 
 
+def test_store_exports_multi_comma_organization_author():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{reservoirs2024,
+  author = {{MILLER, RANDALL S., Reservoirs, Inc}},
+  title = {Reservoir Study},
+  year = {2024}
+}
+"""
+        )
+
+        exported = store.export_bibtex()
+
+        assert "{MILLER, RANDALL S., Reservoirs, Inc}" in exported
+    finally:
+        store.close()
+
+
 def test_store_records_provenance_and_review_status():
     store = BibliographyStore()
     try:
