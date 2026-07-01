@@ -5,7 +5,7 @@
 ## Project Structure
 
 ```
-/home/netuser/dev/CiteGeist/
+CiteGeist/
 ├── db/
 │   └── migrations/
 │       └── 0001_multisource.sql           ✅ NEW - Multi-source schema

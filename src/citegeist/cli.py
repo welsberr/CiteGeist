@@ -14,6 +14,7 @@ from .claim_support import analyze_support_gaps
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
 from .notebook_export import export_notebook_topic_bundle
+from .okf_export import export_okf_bundle
 from .extract import (
     available_extraction_backends,
     check_extraction_comparison_summary,
@@ -57,6 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-stubs",
         action="store_true",
         help="Include DOI-only placeholder records in broad exports",
+    )
+
+    export_okf_parser = subparsers.add_parser(
+        "export-okf",
+        help="Export entries as an Open Knowledge Format-style Markdown bundle",
+    )
+    export_okf_parser.add_argument("citation_keys", nargs="*", help="Optional citation keys to export")
+    export_okf_parser.add_argument("--topic", help="Export all entries assigned to a topic slug")
+    export_okf_parser.add_argument("--output-dir", required=True, help="Directory to write the OKF bundle")
+    export_okf_parser.add_argument(
+        "--include-stubs",
+        action="store_true",
+        help="Include DOI-only placeholder records in the OKF bundle",
     )
 
     sync_jabref_parser = subparsers.add_parser(
@@ -740,6 +754,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_show(store, args.citation_key, args.limit, args.provenance, args.conflicts)
         if args.command == "export":
             return _run_export(store, args.citation_keys, args.output, args.include_stubs)
+        if args.command == "export-okf":
+            return _run_export_okf(store, args.citation_keys, args.topic, args.output_dir, args.include_stubs)
         if args.command == "sync-jabref":
             return _run_sync_jabref(
                 store,
@@ -1020,6 +1036,34 @@ def _run_export(
     else:
         if rendered:
             print(rendered)
+    return 0
+
+
+def _run_export_okf(
+    store: BibliographyStore,
+    citation_keys: list[str],
+    topic_slug: str | None,
+    output_dir: str,
+    include_stubs: bool,
+) -> int:
+    if citation_keys and topic_slug:
+        print("Cannot combine citation keys with --topic", file=sys.stderr)
+        return 2
+    try:
+        payload = export_okf_bundle(
+            store,
+            output_dir,
+            topic_slug=topic_slug,
+            citation_keys=citation_keys or None,
+            include_stubs=include_stubs,
+        )
+    except KeyError:
+        print(f"Topic not found: {topic_slug}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(payload, indent=2))
     return 0
 
 

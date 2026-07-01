@@ -34,6 +34,6 @@ When resolved, CiteGeist should add or export reviewed bibliography records rath
 
 The first scaffold with pending source slots is:
 
-- `/home/netuser/dev/evo-edu.org/notebook/concepts/allele-frequency-change.scaffold.json`
+- `notebook/concepts/allele-frequency-change.scaffold.json`
 
 Its slots cover Hardy-Weinberg expectations, drift foundations, and selection foundations.

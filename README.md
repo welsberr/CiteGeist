@@ -60,6 +60,7 @@ The initial repo includes:
 - OAI-PMH repository discovery via `Identify`, `ListSets`, and `ListMetadataFormats` to target harvests more precisely;
 - bibliography bootstrap workflows that can start from a seed `.bib`, a topic phrase, or both;
 - batch bootstrap orchestration from JSON job files containing seed BibTeX paths, topic phrases, or both;
+- Open Knowledge Format-style Markdown bundle export for portable, provenance-preserving topic and bibliography interchange;
 - normalized tables for entries, creators, identifiers, and citation relations;
 - full-text-search-ready indexing over title, abstract, and fulltext when SQLite FTS5 is available;
 - tests covering parsing, ingestion, relation storage, and search.
@@ -183,6 +184,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 sync-jabref my
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topics
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 topic-entries abiogenesis
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-topic abiogenesis --output abiogenesis.bib
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export-okf --topic abiogenesis --output-dir abiogenesis-okf
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith2024graphs --relation cites --depth 2 --missing-only
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith2024graphs --relation cites --depth 2 --format json-graph
 PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 graph smith2024graphs --relation cites --depth 2 --format dot
@@ -201,6 +203,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 export --outpu
 For a fuller option-by-option CLI cookbook, see [examples/cli/README.md](./examples/cli/README.md).
 
 Broad BibTeX exports skip DOI-only placeholder records such as `Referenced work N` by default. Use `--include-stubs` on `export` or `export-topic` if you want those entries included anyway.
+
+`export-okf` writes a portable Markdown bundle with `index.md`, `log.md`, `manifest.json`, `bibliography.bib`, topic pages, and one work page per citation key. The work pages preserve review status, bibliographic metadata, topic membership, citation links, BibTeX, field provenance, relation provenance, and field conflicts so the bundle can be read directly or imported by downstream knowledge tools.
 
 Long-running CLI commands report progress on `stderr` so `stdout` remains clean for JSON, BibTeX, or tabular output.
 

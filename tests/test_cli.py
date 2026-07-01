@@ -115,6 +115,80 @@ def test_cli_export_skips_stub_entries_by_default_but_can_include_them(tmp_path:
     assert "@misc{stubdoi," in include_export.stdout
 
 
+def test_cli_export_okf_writes_markdown_bundle_for_topic(tmp_path: Path):
+    from citegeist.storage import BibliographyStore
+
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(SAMPLE_BIB, encoding="utf-8")
+    assert run_cli(tmp_path, "ingest", "--source-label", "fixture.bib", str(bib_path)).returncode == 0
+
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.add_entry_topic(
+            "smith2024graphs",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+            confidence=0.9,
+        )
+        store.add_entry_topic(
+            "miller2023search",
+            topic_slug="graph-methods",
+            topic_name="Graph Methods",
+            source_url="https://example.org/topics/graph-methods",
+            source_label="topic-seed",
+            confidence=0.8,
+        )
+        assert store.add_relation(
+            "smith2024graphs",
+            "miller2023search",
+            "cites",
+            source_type="fixture",
+            source_label="reference-list",
+            confidence=0.95,
+        )
+    finally:
+        store.close()
+
+    output_dir = tmp_path / "okf"
+    result = run_cli(tmp_path, "export-okf", "--topic", "graph-methods", "--output-dir", str(output_dir))
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["work_count"] == 2
+
+    assert (output_dir / "index.md").exists()
+    assert (output_dir / "log.md").exists()
+    assert (output_dir / "manifest.json").exists()
+    assert "@article{smith2024graphs," in (output_dir / "bibliography.bib").read_text(encoding="utf-8")
+
+    topic_page = (output_dir / "topics" / "graph-methods.md").read_text(encoding="utf-8")
+    assert "okf_type: \"citegeist.topic\"" in topic_page
+    assert "[Graph-first bibliography augmentation](../works/smith2024graphs.md)" in topic_page
+
+    work_page = (output_dir / "works" / "smith2024graphs.md").read_text(encoding="utf-8")
+    assert "okf_type: \"citegeist.work\"" in work_page
+    assert "citation_key: \"smith2024graphs\"" in work_page
+    assert "[miller2023search](miller2023search.md)" in work_page
+    assert "fixture.bib" in work_page
+    assert "reference-list" in work_page
+
+
+def test_cli_export_okf_rejects_topic_and_explicit_keys(tmp_path: Path):
+    result = run_cli(
+        tmp_path,
+        "export-okf",
+        "smith2024graphs",
+        "--topic",
+        "graph-methods",
+        "--output-dir",
+        str(tmp_path / "okf"),
+    )
+    assert result.returncode == 2
+    assert "Cannot combine citation keys with --topic" in result.stderr
+
+
 def test_cli_provenance_and_status_updates(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(SAMPLE_BIB, encoding="utf-8")
