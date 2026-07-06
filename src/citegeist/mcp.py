@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .extract import extract_references
+from .app_api import LiteratureExplorerApi
 from .storage import BibliographyStore
 
 
@@ -98,6 +99,58 @@ def _show_entry(arguments: dict[str, Any]) -> dict[str, Any]:
     return _json_text(payload)
 
 
+def _search_topic(arguments: dict[str, Any]) -> dict[str, Any]:
+    topic_slug = arguments.get("topic_slug") or arguments.get("topic")
+    if not topic_slug:
+        raise ValueError("topic_slug is required")
+    limit = int(arguments.get("limit", arguments.get("entry_limit", 20)))
+    query = str(arguments.get("query") or "").strip()
+    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    try:
+        topic = store.get_topic(topic_slug)
+        if topic is None:
+            raise ValueError(f"Unknown topic: {topic_slug}")
+        payload: dict[str, Any] = {
+            "topic": topic,
+            "query": query or None,
+        }
+        if query:
+            payload["results"] = store.search_text(query, limit=limit, topic_slug=topic_slug)
+        else:
+            payload["entries"] = store.list_topic_entries(topic_slug, limit=limit)
+    finally:
+        store.close()
+    return _json_text(payload)
+
+
+def _expand_topic(arguments: dict[str, Any]) -> dict[str, Any]:
+    topic_slug = arguments.get("topic_slug") or arguments.get("topic")
+    if not topic_slug:
+        raise ValueError("topic_slug is required")
+    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    try:
+        api = LiteratureExplorerApi(store)
+        payload = api.expand_topic(
+            topic_slug,
+            topic_phrase=arguments.get("topic_phrase"),
+            source=arguments.get("source", "openalex"),
+            relation_type=arguments.get("relation_type", arguments.get("relation", "cites")),
+            seed_limit=int(arguments.get("seed_limit", 25)),
+            per_seed_limit=int(arguments.get("per_seed_limit", 25)),
+            min_relevance=float(arguments.get("min_relevance", 0.2)),
+            seed_keys=arguments.get("seed_keys"),
+            preview_only=bool(arguments.get("preview_only", True)),
+            max_rounds=int(arguments.get("max_rounds", arguments.get("rounds", 1))),
+            recent_years=arguments.get("recent_years"),
+            target_recent_entries=arguments.get("target_recent_entries"),
+        )
+        if payload is None:
+            raise ValueError(f"Unknown topic: {topic_slug}")
+    finally:
+        store.close()
+    return _json_text(payload)
+
+
 TOOLS: dict[str, dict[str, Any]] = {
     "parse_bibtex": {
         "description": "Parse BibTeX text or a BibTeX file into structured entries.",
@@ -166,6 +219,45 @@ TOOLS: dict[str, dict[str, Any]] = {
             },
         },
         "handler": _show_entry,
+    },
+    "search_topic": {
+        "description": "Search or list entries assigned to one CiteGeist topic.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"},
+                "topic_slug": {"type": "string"},
+                "topic": {"type": "string"},
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 20},
+            },
+        },
+        "handler": _search_topic,
+    },
+    "expand_topic": {
+        "description": "Expand one CiteGeist topic from seed entries and assign relevant discoveries back to that topic.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"},
+                "topic_slug": {"type": "string"},
+                "topic": {"type": "string"},
+                "topic_phrase": {"type": "string"},
+                "source": {"type": "string", "default": "openalex"},
+                "relation_type": {"type": "string", "default": "cites"},
+                "relation": {"type": "string"},
+                "seed_limit": {"type": "integer", "default": 25},
+                "per_seed_limit": {"type": "integer", "default": 25},
+                "min_relevance": {"type": "number", "default": 0.2},
+                "seed_keys": {"type": "array", "items": {"type": "string"}},
+                "preview_only": {"type": "boolean", "default": True},
+                "max_rounds": {"type": "integer", "default": 1},
+                "rounds": {"type": "integer"},
+                "recent_years": {"type": "integer"},
+                "target_recent_entries": {"type": "integer"},
+            },
+        },
+        "handler": _expand_topic,
     },
 }
 
