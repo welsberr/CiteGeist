@@ -8,6 +8,23 @@ The aim is not just to store citations. The aim is to help with the harder probl
 
 `citegeist` is a BibTeX-native research tool for citation extraction, metadata enrichment, citation-graph expansion, and semantic search over scholarly sources.
 
+## Name And Scope Note
+
+This project is independent from Beger and Henneking's arXiv-focused
+[Citegeist](https://arxiv.org/abs/2503.23229) system for automated related-work
+generation and from the unrelated
+[CITEgeist](https://pypi.org/project/citegeist/) spatial-transcriptomics
+package on PyPI.
+
+This CiteGeist is a BibTeX-native bibliography workbench. Its primary focus is
+citation extraction, metadata enrichment, provenance, review states, citation
+graph expansion, semantic search, and reviewed BibTeX export. It is not
+primarily an automated prose generator for related-work sections. If this
+project is packaged for broad public distribution, use an unambiguous
+distribution name such as `citegeist-workbench`, `citegeist-bib`, or
+`citegeist-bibliography` rather than publishing a package as plain
+`citegeist`.
+
 ## Scope
 
 The project is intended to support a workflow like this:
