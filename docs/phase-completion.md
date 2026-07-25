@@ -10,7 +10,7 @@
 |-------|-------|--------|---------|
 | **0** | Scope Reframe | ✅ Complete | Planning now answers the source question directly |
 | **1** | Source Layer Tightening | ✅ Complete | Registry, CrossRef plugin, compatibility seam, and source catalog repaired |
-| **2** | Next Open Source Additions | 🚧 In Progress | OpenCitations, Unpaywall, and Europe PMC integrated |
+| **2** | Next Open Source Additions | 🚧 In Progress | OpenCitations, Unpaywall, Europe PMC, and Semantic Scholar integrated |
 | **3** | Optional Source Evaluation | ⏳ Planned | OpenAIRE evaluated later if acquisition breadth matters |
 | **D** | Database / Vector Expansion | ⏸ Deferred | Not required for the current source-incorporation decision |
 
@@ -21,7 +21,7 @@
 ```
 ✅ test_sources_plugin.py
 ✅ test_sources_catalog.py
-✅ existing full suite still expected to pass
+✅ full suite: 290 passed, 5 skipped on 2026-07-25
 ```
 
 ---
@@ -76,9 +76,16 @@ tests/
 3. Keep graph-source scope disciplined as broader coverage grows
 
 ### Later
-1. Evaluate `Semantic Scholar`
-2. Evaluate `OpenAIRE`
-3. Revisit database/vector work only if a concrete source need demands it
+1. Evaluate `OpenAIRE`
+2. Revisit database/vector work only if a concrete source need demands it
+
+### Unified confidence migration
+
+The working tree contains a partial typed-assessment implementation. It is not
+a completed migration or release. The CLI migration command, backup/rollback,
+portable interval storage, reviewed identity outcomes/calibration, and
+Epistemap graph export remain. The audited phase matrix is in Epistemap
+`docs/confidence-overhaul-implementation-status.md`.
 
 ---
 
@@ -106,6 +113,6 @@ tests/
 
 ---
 
-**Last Updated:** 2026-04-25
+**Last Updated:** 2026-07-25
 **Status:** Sources-first plan in effect
 **Confidence:** High

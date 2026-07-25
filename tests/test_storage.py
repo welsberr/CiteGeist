@@ -1,4 +1,4 @@
-from citegeist import BibliographyStore, parse_bibtex
+from citegeist import BibliographyStore, ConfidenceAssessment, AssessmentMethodRef, migrate_legacy_confidence_assessments, parse_bibtex
 
 
 SAMPLE_BIB = """
@@ -49,6 +49,56 @@ def test_store_ingests_entries_relations_and_search_text():
             "miller2023search",
             "smith2024graphs",
         ]
+    finally:
+        store.close()
+
+
+def test_store_persists_typed_confidence_assessments_and_preserves_zero():
+    store = BibliographyStore()
+    try:
+        assessment = ConfidenceAssessment(
+            assessment_id="assess::zero",
+            subject_id="work::smith2024graphs",
+            dimension="identity_resolution",
+            value=0.0,
+            band="very_low",
+            method=AssessmentMethodRef(name="fixture", version="1.0", policy_id="test"),
+            recorded_at="2026-07-25T12:00:00+00:00",
+        )
+
+        store.upsert_confidence_assessment(assessment)
+        store.upsert_confidence_assessment(assessment)
+        rows = store.list_confidence_assessments("work::smith2024graphs")
+
+        assert len(rows) == 1
+        assert rows[0]["value"] == 0.0
+        assert rows[0]["dimension"] == "identity_resolution"
+        assert rows[0]["method"]["policy_id"] == "test"
+    finally:
+        store.close()
+
+
+def test_confidence_migration_is_dry_run_first_and_idempotent(tmp_path):
+    from citegeist.okf_export import export_okf_bundle
+
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(SAMPLE_BIB)
+        dry_run = migrate_legacy_confidence_assessments(store)
+        assert dry_run["apply"] is False
+        assert dry_run["candidate_count"] > 0
+        assert store.list_confidence_assessments() == []
+
+        applied = migrate_legacy_confidence_assessments(store, apply=True)
+        reapplied = migrate_legacy_confidence_assessments(store, apply=True)
+        assert applied["candidate_count"] == reapplied["candidate_count"]
+        assert len(store.list_confidence_assessments()) == applied["candidate_count"]
+
+        export_okf_bundle(store, tmp_path)
+        work_page = (tmp_path / "works" / "smith2024graphs.md").read_text(encoding="utf-8")
+        manifest = (tmp_path / "manifest.json").read_text(encoding="utf-8")
+        assert "## Confidence Assessments" in work_page
+        assert "citegeist.confidence_assessments.v1" in manifest
     finally:
         store.close()
 

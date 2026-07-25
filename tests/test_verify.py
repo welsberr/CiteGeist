@@ -100,6 +100,10 @@ def test_verifier_scores_and_sorts_search_candidates():
     assert result.entry.citation_key == "goodmatch"
     assert result.status in {"high_confidence", "exact"}
     assert result.alternates[0].entry.citation_key == "weaker"
+    payload = result.to_dict()
+    assert payload["assessments"][0]["dimension"] == "identity_resolution"
+    assert payload["assessments"][0]["rationale"] == "Bibliographic match score; not source reliability or claim support."
+    assert payload["alternates"][0]["score"] == payload["assessments"][1]["value"]
 
 
 def test_verification_result_to_bib_entry_contains_audit_fields():

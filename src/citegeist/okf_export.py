@@ -70,6 +70,7 @@ def export_okf_bundle(
     manifest = {
         "bundle_kind": "citegeist_okf_bundle",
         "okf_profile": "citegeist.work.topic.v1",
+        "confidence_profile": "citegeist.confidence_assessments.v1",
         "exported_at": exported_at,
         "topic": topic,
         "include_stubs": include_stubs,
@@ -117,6 +118,7 @@ def _render_work_page(
     }
     provenance = store.get_field_provenance(citation_key)
     relation_provenance = store.get_relation_provenance(citation_key)
+    assessments = store.list_confidence_assessments(f"work::{citation_key}")
     conflicts = store.get_field_conflicts(citation_key)
 
     frontmatter = _frontmatter(
@@ -169,6 +171,9 @@ def _render_work_page(
                 ["target_citation_key", "relation_type", "source_type", "source_label", "confidence", "recorded_at"],
             )
         )
+    if assessments:
+        lines.extend(["", "## Confidence Assessments", ""])
+        lines.extend(_table(assessments, ["assessment_id", "dimension", "value", "band", "method", "recorded_at"]))
     if conflicts:
         lines.extend(["", "## Field Conflicts", ""])
         lines.extend(_table(conflicts, ["field_name", "current_value", "proposed_value", "source_label", "status", "recorded_at"]))

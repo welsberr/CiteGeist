@@ -1,5 +1,23 @@
 # CiteGeist Roadmap: Sources-First Expansion
 
+The unified confidence overhaul is in progress. Its audited cross-repository
+status is maintained in Epistemap at
+`docs/confidence-overhaul-implementation-status.md`; CiteGeist's typed
+assessment table and dry-run migration function are a partial CG3
+implementation, not a completed migration or release.
+
+The next capability roadmap is
+[docs/epistemap-knowledge-graph-roadmap.md](docs/epistemap-knowledge-graph-roadmap.md).
+It preserves this sources-first direction: CiteGeist's SQLite bibliography
+remains canonical, while Epistemap supplies a rebuildable graph projection for
+portable traversal, diagnostics, temporal views, typed assessments, and
+cross-repository interchange.
+
+Implement the read-only graph profile/export/diagnostic phases before
+claim-support assessment. Coordinate confidence migration with Epistemap,
+GroundRecall, and Didactopus rather than creating another CiteGeist-specific
+scalar confidence scheme.
+
 ## Purpose
 
 The primary question is not “how do we redesign CiteGeist around a new storage engine?” The primary question is “which additional open bibliographic sources should CiteGeist incorporate next?”
