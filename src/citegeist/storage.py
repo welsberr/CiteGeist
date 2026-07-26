@@ -148,6 +148,10 @@ class BibliographyStore:
                 dimension TEXT NOT NULL,
                 value REAL,
                 band TEXT NOT NULL DEFAULT 'unknown',
+                interval_level REAL,
+                interval_lower REAL,
+                interval_upper REAL,
+                interval_method TEXT NOT NULL DEFAULT '',
                 schema_version TEXT NOT NULL DEFAULT '1.0',
                 assessor_id TEXT NOT NULL DEFAULT '',
                 method_name TEXT NOT NULL,
@@ -161,6 +165,14 @@ class BibliographyStore:
                 recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 supersedes_assessment_id TEXT NOT NULL DEFAULT '',
                 metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS confidence_migration_events (
+                id INTEGER PRIMARY KEY,
+                migration_version TEXT NOT NULL,
+                backup_path TEXT NOT NULL DEFAULT '',
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                report_json TEXT NOT NULL DEFAULT '{}'
             );
 
             CREATE TABLE IF NOT EXISTS field_conflicts (
@@ -179,6 +191,7 @@ class BibliographyStore:
 
         self._ensure_entry_columns()
         self._ensure_topic_columns()
+        self._ensure_confidence_assessment_columns()
 
         if self._fts5_enabled:
             self.connection.execute(
@@ -194,21 +207,27 @@ class BibliographyStore:
             )
         self.connection.commit()
 
-    def upsert_confidence_assessment(self, assessment: ConfidenceAssessment) -> None:
+    def upsert_confidence_assessment(self, assessment: ConfidenceAssessment, *, commit: bool = True) -> None:
+        interval = assessment.interval
         self.connection.execute(
             """
             INSERT INTO confidence_assessments (
                 assessment_id, subject_id, dimension, value, band, schema_version,
+                interval_level, interval_lower, interval_upper, interval_method,
                 assessor_id, method_name, method_version, policy_id,
                 basis_record_ids_json, source_family_ids_json, basis_hash,
                 rationale, valid_at, recorded_at, supersedes_assessment_id, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(assessment_id) DO UPDATE SET
                 subject_id = excluded.subject_id,
                 dimension = excluded.dimension,
                 value = excluded.value,
                 band = excluded.band,
                 schema_version = excluded.schema_version,
+                interval_level = excluded.interval_level,
+                interval_lower = excluded.interval_lower,
+                interval_upper = excluded.interval_upper,
+                interval_method = excluded.interval_method,
                 assessor_id = excluded.assessor_id,
                 method_name = excluded.method_name,
                 method_version = excluded.method_version,
@@ -229,6 +248,10 @@ class BibliographyStore:
                 assessment.value,
                 assessment.band,
                 assessment.schema_version,
+                interval.level if interval is not None else None,
+                interval.lower if interval is not None else None,
+                interval.upper if interval is not None else None,
+                interval.method if interval is not None else "",
                 assessment.assessor_id,
                 assessment.method.name,
                 assessment.method.version,
@@ -243,7 +266,26 @@ class BibliographyStore:
                 json.dumps(assessment.metadata, sort_keys=True),
             ),
         )
-        self.connection.commit()
+        if commit:
+            self.connection.commit()
+
+    def record_confidence_migration_event(
+        self,
+        *,
+        migration_version: str,
+        backup_path: str,
+        report: dict[str, object],
+        commit: bool = True,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO confidence_migration_events (migration_version, backup_path, report_json)
+            VALUES (?, ?, ?)
+            """,
+            (migration_version, backup_path, json.dumps(report, sort_keys=True)),
+        )
+        if commit:
+            self.connection.commit()
 
     def list_confidence_assessments(self, subject_id: str | None = None) -> list[dict[str, object]]:
         if subject_id is None:
@@ -1369,6 +1411,24 @@ class BibliographyStore:
                 if "duplicate column name" not in str(exc).lower():
                     raise
 
+    def _ensure_confidence_assessment_columns(self) -> None:
+        columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(confidence_assessments)").fetchall()
+        }
+        statements = {
+            "interval_level": "ALTER TABLE confidence_assessments ADD COLUMN interval_level REAL",
+            "interval_lower": "ALTER TABLE confidence_assessments ADD COLUMN interval_lower REAL",
+            "interval_upper": "ALTER TABLE confidence_assessments ADD COLUMN interval_upper REAL",
+            "interval_method": "ALTER TABLE confidence_assessments ADD COLUMN interval_method TEXT NOT NULL DEFAULT ''",
+        }
+        for column, statement in statements.items():
+            if column not in columns:
+                try:
+                    self.connection.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+
     def _record_field_provenance(
         self,
         entry_id: int,
@@ -1425,7 +1485,7 @@ def _entry_to_bibtex(entry: BibEntry) -> str:
 
 
 def _assessment_row_payload(row: sqlite3.Row) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "schema_version": row["schema_version"],
         "assessment_id": row["assessment_id"],
         "subject_id": row["subject_id"],
@@ -1447,3 +1507,11 @@ def _assessment_row_payload(row: sqlite3.Row) -> dict[str, object]:
         "supersedes_assessment_id": row["supersedes_assessment_id"],
         "metadata": json.loads(row["metadata_json"] or "{}"),
     }
+    if row["interval_method"]:
+        payload["interval"] = {
+            "level": row["interval_level"],
+            "lower": row["interval_lower"],
+            "upper": row["interval_upper"],
+            "method": row["interval_method"],
+        }
+    return payload
