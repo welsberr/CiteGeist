@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+import warnings
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .confidence import identity_resolution_assessment
@@ -18,22 +19,65 @@ class VerificationMatch:
     source_label: str
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class VerificationResult:
     query: str
     context: str
     status: str
-    confidence: float
+    match_score: float
     entry: BibEntry
     source_label: str
     alternates: list[VerificationMatch]
     input_type: str
     input_key: str | None = None
 
+    def __init__(
+        self,
+        *,
+        query: str,
+        context: str,
+        status: str,
+        entry: BibEntry,
+        source_label: str,
+        alternates: list[VerificationMatch],
+        input_type: str,
+        input_key: str | None = None,
+        match_score: float | None = None,
+        confidence: float | None = None,
+    ) -> None:
+        if match_score is None:
+            if confidence is None:
+                raise TypeError("VerificationResult requires match_score")
+            warnings.warn(
+                "VerificationResult(confidence=...) is deprecated; use match_score.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            match_score = confidence
+        self.query = query
+        self.context = context
+        self.status = status
+        self.match_score = match_score
+        self.entry = entry
+        self.source_label = source_label
+        self.alternates = alternates
+        self.input_type = input_type
+        self.input_key = input_key
+
+    @property
+    def confidence(self) -> float:
+        warnings.warn(
+            "VerificationResult.confidence is deprecated; use match_score.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.match_score
+
     def to_bib_entry(self) -> BibEntry:
         fields = dict(self.entry.fields)
         fields["x_status"] = self.status
-        fields["x_confidence"] = f"{self.confidence:.2f}"
+        fields["x_match_score"] = f"{self.match_score:.2f}"
+        fields["x_confidence"] = f"{self.match_score:.2f}"
         fields["x_source"] = self.source_label
         fields["x_query"] = self.query
         fields["x_context"] = self.context
@@ -54,7 +98,7 @@ class VerificationResult:
         assessments = [
             identity_resolution_assessment(
                 subject_id=subject_id,
-                score=self.confidence,
+                score=self.match_score,
                 source_label=self.source_label,
                 basis_record_ids=[self.input_key or self.query],
             ).to_dict()
@@ -74,7 +118,8 @@ class VerificationResult:
             "input_type": self.input_type,
             "input_key": self.input_key,
             "status": self.status,
-            "confidence": round(self.confidence, 4),
+            "match_score": round(self.match_score, 4),
+            "confidence": round(self.match_score, 4),
             "assessments": assessments,
             "source_label": self.source_label,
             "entry": {
@@ -171,7 +216,7 @@ class BibliographyVerifier:
                     query=query,
                     context=context,
                     status="exact",
-                    confidence=1.0,
+                    match_score=1.0,
                     entry=direct.entry,
                     source_label=direct.source_label,
                     alternates=[],
@@ -185,7 +230,7 @@ class BibliographyVerifier:
                     query=query,
                     context=context,
                     status="exact",
-                    confidence=1.0,
+                    match_score=1.0,
                     entry=direct.entry,
                     source_label=direct.source_label,
                     alternates=[],
@@ -242,7 +287,7 @@ class BibliographyVerifier:
                 query=query,
                 context=context,
                 status="not_found",
-                confidence=0.0,
+                match_score=0.0,
                 entry=fallback_entry,
                 source_label="none",
                 alternates=[],
@@ -255,7 +300,7 @@ class BibliographyVerifier:
             query=query,
             context=context,
             status=status,
-            confidence=best.score,
+            match_score=best.score,
             entry=best.entry,
             source_label=best.source_label,
             alternates=scored[1: min(len(scored), 4)],

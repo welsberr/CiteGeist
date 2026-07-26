@@ -125,6 +125,21 @@ def test_cli_confidence_migrate_dry_run_apply_and_restore(tmp_path: Path):
     assert post_restore.returncode == 0
 
 
+def test_cli_export_epistemap_writes_graph_profile(tmp_path: Path):
+    bib_path = tmp_path / "sample.bib"
+    bib_path.write_text(SAMPLE_BIB, encoding="utf-8")
+    output_path = tmp_path / "epistemap_graph.json"
+
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+    result = run_cli(tmp_path, "export-epistemap", str(output_path))
+
+    assert result.returncode == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["graph_kind"] == "citegeist_epistemap_profile"
+    assert payload["policy_id"] == "citegeist_epistemap_graph_profile_v1"
+    assert all(edge["metadata"]["not_evidential_support"] is True for edge in payload["edges"])
+
+
 def test_cli_export_skips_stub_entries_by_default_but_can_include_them(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(

@@ -630,6 +630,24 @@ Do not begin CG6 claim-support assessment before the typed confidence and
 reviewer-assessment foundations exist. Structural graph export and diagnostics
 in CG1–CG2 can proceed earlier because they are read-only projections.
 
+## W6 Implementation Note
+
+CiteGeist now exposes bibliographic verification certainty as canonical
+`match_score`. The legacy `VerificationResult.confidence` constructor argument
+and property remain compatibility aliases and emit `DeprecationWarning`
+messages naming `match_score` as the replacement.
+
+Reviewed identity outcomes are stored in `identity_review_outcomes` with
+reviewer, time, candidate-set policy, evidence inspected, and match/non-match
+result. `BibliographyStore.identity_calibration_rows()` exports only reviewed
+outcomes and joins them to typed `identity_resolution` assessments.
+
+`citegeist export-epistemap OUT.json [--topic TOPIC]` writes a deterministic
+Epistemap-compatible graph profile. Citation and topic edges are explicitly
+marked as non-evidential topology, while typed confidence assessments, review
+state, conflicts, provenance, source labels, and identity calibration rows
+remain auditable in the exported profile.
+
 ## Testing Commands
 
 ### CiteGeist

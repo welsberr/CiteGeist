@@ -175,6 +175,18 @@ class BibliographyStore:
                 report_json TEXT NOT NULL DEFAULT '{}'
             );
 
+            CREATE TABLE IF NOT EXISTS identity_review_outcomes (
+                id INTEGER PRIMARY KEY,
+                subject_id TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                reviewed_match INTEGER NOT NULL,
+                reviewer_id TEXT NOT NULL,
+                candidate_set_policy TEXT NOT NULL,
+                evidence_inspected_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT NOT NULL DEFAULT '',
+                reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS field_conflicts (
                 id INTEGER PRIMARY KEY,
                 entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
@@ -286,6 +298,90 @@ class BibliographyStore:
         )
         if commit:
             self.connection.commit()
+
+    def record_identity_review_outcome(
+        self,
+        *,
+        subject_id: str,
+        candidate_key: str,
+        reviewed_match: bool,
+        reviewer_id: str,
+        candidate_set_policy: str,
+        evidence_inspected: list[str] | None = None,
+        notes: str = "",
+        commit: bool = True,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO identity_review_outcomes (
+                subject_id, candidate_key, reviewed_match, reviewer_id,
+                candidate_set_policy, evidence_inspected_json, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                subject_id,
+                candidate_key,
+                1 if reviewed_match else 0,
+                reviewer_id,
+                candidate_set_policy,
+                json.dumps(list(evidence_inspected or []), sort_keys=True),
+                notes,
+            ),
+        )
+        if commit:
+            self.connection.commit()
+
+    def list_identity_review_outcomes(self) -> list[dict[str, object]]:
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM identity_review_outcomes
+            ORDER BY subject_id, candidate_key, reviewed_at, id
+            """
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "subject_id": row["subject_id"],
+                "candidate_key": row["candidate_key"],
+                "reviewed_match": bool(row["reviewed_match"]),
+                "reviewer_id": row["reviewer_id"],
+                "candidate_set_policy": row["candidate_set_policy"],
+                "evidence_inspected": json.loads(row["evidence_inspected_json"] or "[]"),
+                "notes": row["notes"],
+                "reviewed_at": row["reviewed_at"],
+            }
+            for row in rows
+        ]
+
+    def identity_calibration_rows(self) -> list[dict[str, object]]:
+        outcomes = self.list_identity_review_outcomes()
+        assessments = {
+            str(row["subject_id"]): row
+            for row in self.list_confidence_assessments()
+            if row.get("dimension") == "identity_resolution"
+        }
+        rows = []
+        for outcome in outcomes:
+            assessment = assessments.get(str(outcome["subject_id"]))
+            if assessment is None:
+                continue
+            rows.append(
+                {
+                    "subject_id": outcome["subject_id"],
+                    "candidate_key": outcome["candidate_key"],
+                    "predicted": assessment.get("value"),
+                    "observed": 1.0 if outcome["reviewed_match"] else 0.0,
+                    "dimension": "identity_resolution",
+                    "reviewed_outcome": True,
+                    "reviewer_id": outcome["reviewer_id"],
+                    "candidate_set_policy": outcome["candidate_set_policy"],
+                    "evidence_inspected": outcome["evidence_inspected"],
+                    "reviewed_at": outcome["reviewed_at"],
+                    "assessment_id": assessment.get("assessment_id"),
+                }
+            )
+        return rows
 
     def list_confidence_assessments(self, subject_id: str | None = None) -> list[dict[str, object]]:
         if subject_id is None:

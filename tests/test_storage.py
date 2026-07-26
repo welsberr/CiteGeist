@@ -7,6 +7,7 @@ from citegeist import (
     parse_bibtex,
     restore_confidence_migration_backup,
 )
+from citegeist.epistemap_export import build_epistemap_graph_profile
 
 
 SAMPLE_BIB = """
@@ -84,6 +85,66 @@ def test_store_persists_typed_confidence_assessments_and_preserves_zero():
         assert rows[0]["interval"] == {"level": 0.95, "lower": 0.0, "upper": 0.1, "method": "fixture_exact"}
         assert rows[0]["dimension"] == "identity_resolution"
         assert rows[0]["method"]["policy_id"] == "test"
+    finally:
+        store.close()
+
+
+def test_identity_review_outcomes_emit_reviewed_calibration_rows():
+    store = BibliographyStore()
+    try:
+        assessment = ConfidenceAssessment(
+            assessment_id="identity::smith",
+            subject_id="citegeist:verification:smith2024graphs",
+            dimension="identity_resolution",
+            value=0.82,
+            band="high",
+            method=AssessmentMethodRef(name="fixture", version="1.0", policy_id="identity_fixture"),
+            basis_record_ids=["query::smith"],
+        )
+        store.upsert_confidence_assessment(assessment)
+        store.record_identity_review_outcome(
+            subject_id="citegeist:verification:smith2024graphs",
+            candidate_key="smith2024graphs",
+            reviewed_match=True,
+            reviewer_id="reviewer-1",
+            candidate_set_policy="fixture_top_5",
+            evidence_inspected=["title", "doi"],
+            notes="Reviewed by fixture.",
+        )
+
+        rows = store.identity_calibration_rows()
+
+        assert rows == [
+            {
+                "subject_id": "citegeist:verification:smith2024graphs",
+                "candidate_key": "smith2024graphs",
+                "predicted": 0.82,
+                "observed": 1.0,
+                "dimension": "identity_resolution",
+                "reviewed_outcome": True,
+                "reviewer_id": "reviewer-1",
+                "candidate_set_policy": "fixture_top_5",
+                "evidence_inspected": ["title", "doi"],
+                "reviewed_at": rows[0]["reviewed_at"],
+                "assessment_id": "identity::smith",
+            }
+        ]
+    finally:
+        store.close()
+
+
+def test_epistemap_graph_profile_is_deterministic_and_non_evidential_for_topology():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(SAMPLE_BIB)
+        first = build_epistemap_graph_profile(store)
+        second = build_epistemap_graph_profile(store)
+
+        assert first == second
+        assert first["graph_kind"] == "citegeist_epistemap_profile"
+        assert any(edge["type"] == "cites" for edge in first["edges"])
+        assert all(edge["metadata"]["not_evidential_support"] is True for edge in first["edges"])
+        assert first["metadata"]["non_evidential_topology"]
     finally:
         store.close()
 
