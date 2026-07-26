@@ -16,6 +16,7 @@ This documentation therefore emphasizes:
 ## Documentation Files
 
 ### Planning and Status
+- **[epistemap-knowledge-graph-roadmap.md](./epistemap-knowledge-graph-roadmap.md)** - provenance-aware graph operations and cross-repository integration plan
 - **[source-landscape.md](./source-landscape.md)** - recommended next open bibliographic sources
 - **[implementation-progress.md](./implementation-progress.md)** - sources-first progress tracker
 - **[phase-completion.md](./phase-completion.md)** - short status summary
@@ -91,8 +92,10 @@ The existing broader repository test suite should continue to pass as the source
 
 ## Next Steps
 
-1. Decide whether `OpenAIRE` is worth adding for repository-acquisition breadth.
-2. Keep database/vector redesign work deferred unless a source need forces it.
+1. Begin the Epistemap integration with graph-profile fixtures and a
+   deterministic read-only export.
+2. Decide whether `OpenAIRE` is worth adding for repository-acquisition breadth.
+3. Keep database/vector redesign work deferred unless a source need forces it.
 
 ## License
 

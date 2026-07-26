@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
+from .confidence import identity_resolution_assessment
 from .llm_verify import VerificationLlmClient, VerificationLlmConfig
 from .resolve import MetadataResolver, Resolution
 
@@ -49,6 +50,24 @@ class VerificationResult:
         )
 
     def to_dict(self) -> dict[str, object]:
+        subject_id = f"citegeist:verification:{self.input_key or self.entry.citation_key or self.query}"
+        assessments = [
+            identity_resolution_assessment(
+                subject_id=subject_id,
+                score=self.confidence,
+                source_label=self.source_label,
+                basis_record_ids=[self.input_key or self.query],
+            ).to_dict()
+        ]
+        assessments.extend(
+            identity_resolution_assessment(
+                subject_id=f"{subject_id}:alternate:{match.entry.citation_key}",
+                score=match.score,
+                source_label=match.source_label,
+                basis_record_ids=[self.input_key or self.query],
+            ).to_dict()
+            for match in self.alternates
+        )
         return {
             "query": self.query,
             "context": self.context,
@@ -56,6 +75,7 @@ class VerificationResult:
             "input_key": self.input_key,
             "status": self.status,
             "confidence": round(self.confidence, 4),
+            "assessments": assessments,
             "source_label": self.source_label,
             "entry": {
                 "citation_key": self.entry.citation_key,

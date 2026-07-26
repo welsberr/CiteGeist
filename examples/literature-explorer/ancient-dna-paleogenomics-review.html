@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ancient DNA and paleogenomics - CiteGeist Review</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f4ef;
+      --paper: #fffdf8;
+      --ink: #22201c;
+      --muted: #6f6a61;
+      --line: #ded7cc;
+      --accent: #1f6f78;
+      --accent-soft: #e4f1f2;
+      --warn: #8a5a00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--paper);
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+    .meta, .status {
+      color: var(--muted);
+      margin: 0;
+    }
+    .status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      background: #fbf8f0;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    input, select {
+      height: 36px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: 0 10px;
+      border-radius: 4px;
+      font: inherit;
+    }
+    input { min-width: min(420px, 100%); flex: 1; }
+    main .wrap { padding-top: 18px; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      padding: 12px;
+      border-radius: 6px;
+    }
+    .metric b {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+      color: var(--accent);
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .entry {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .entry h2 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+    .entry-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #174f56;
+      border: 1px solid #c8e1e4;
+    }
+    .pill.draft {
+      background: #fff4d8;
+      color: var(--warn);
+      border-color: #ead59a;
+    }
+    .doi {
+      margin-top: 8px;
+      font-size: 13px;
+    }
+    .doi a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .doi a:hover { text-decoration: underline; }
+    .empty {
+      border: 1px dashed var(--line);
+      padding: 24px;
+      background: var(--paper);
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 760px) {
+      .wrap { padding: 18px; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Ancient DNA and paleogenomics</h1>
+      <p class="meta">CiteGeist topic review: <code>ancient-dna-paleogenomics</code></p>
+      <p id="status" class="status">Loading local CiteGeist data from <code>http://127.0.0.1:8765</code>...</p>
+      <div class="controls">
+        <input id="filter" type="search" placeholder="Filter by title, key, year, or status" autocomplete="off">
+        <select id="status-filter" aria-label="Review status">
+          <option value="">All statuses</option>
+          <option value="reviewed">Reviewed</option>
+          <option value="draft">Draft</option>
+        </select>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <section class="summary" aria-label="Topic summary">
+        <div class="metric"><b id="entry-count">0</b><span>Entries</span></div>
+        <div class="metric"><b id="reviewed-count">0</b><span>Reviewed</span></div>
+        <div class="metric"><b id="draft-count">0</b><span>Draft</span></div>
+        <div class="metric"><b id="year-range">-</b><span>Year range</span></div>
+      </section>
+      <section id="entries" aria-label="Entries"></section>
+    </div>
+  </main>
+  <script>
+    const API_BASE = "http://127.0.0.1:8765";
+    const TOPIC_SLUG = "ancient-dna-paleogenomics";
+    const state = { topic: null, entries: [] };
+
+    const els = {
+      status: document.getElementById("status"),
+      filter: document.getElementById("filter"),
+      statusFilter: document.getElementById("status-filter"),
+      entries: document.getElementById("entries"),
+      entryCount: document.getElementById("entry-count"),
+      reviewedCount: document.getElementById("reviewed-count"),
+      draftCount: document.getElementById("draft-count"),
+      yearRange: document.getElementById("year-range"),
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    async function call(method, params) {
+      const response = await fetch(`${API_BASE}/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method, params }),
+      });
+      const payload = await response.json();
+      if (!payload.ok) throw new Error(payload.error || "CiteGeist call failed");
+      return payload.result;
+    }
+
+    function render() {
+      const query = els.filter.value.trim().toLowerCase();
+      const status = els.statusFilter.value;
+      const entries = state.entries.filter((entry) => {
+        const haystack = [
+          entry.title,
+          entry.citation_key,
+          entry.year,
+          entry.review_status,
+          entry.source_label,
+        ].join(" ").toLowerCase();
+        return (!query || haystack.includes(query)) && (!status || entry.review_status === status);
+      });
+
+      const years = state.entries.map((entry) => Number(entry.year)).filter(Number.isFinite);
+      const reviewed = state.entries.filter((entry) => entry.review_status === "reviewed").length;
+      const draft = state.entries.filter((entry) => entry.review_status === "draft").length;
+      els.entryCount.textContent = String(state.entries.length);
+      els.reviewedCount.textContent = String(reviewed);
+      els.draftCount.textContent = String(draft);
+      els.yearRange.textContent = years.length ? `${Math.min(...years)}-${Math.max(...years)}` : "-";
+
+      if (!entries.length) {
+        els.entries.innerHTML = '<div class="empty">No entries match the current filters.</div>';
+        return;
+      }
+      els.entries.innerHTML = entries.map((entry) => {
+        const doi = entry.doi || "";
+        const doiHtml = doi
+          ? `<div class="doi"><a href="https://doi.org/${escapeHtml(doi)}" target="_blank" rel="noreferrer">${escapeHtml(doi)}</a></div>`
+          : "";
+        const statusClass = entry.review_status === "draft" ? "pill draft" : "pill";
+        return `
+          <article class="entry">
+            <h2>${escapeHtml(entry.title || entry.citation_key)}</h2>
+            <div class="entry-meta">
+              <span>${escapeHtml(entry.year || "undated")}</span>
+              <span>${escapeHtml(entry.citation_key)}</span>
+              <span class="${statusClass}">${escapeHtml(entry.review_status || "unknown")}</span>
+              <span>${escapeHtml(entry.source_label || "")}</span>
+            </div>
+            ${doiHtml}
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadTopic() {
+      try {
+        const result = await call("get_topic", { topic_slug: TOPIC_SLUG, entry_limit: 200 });
+        state.topic = result.topic;
+        state.entries = result.entries || [];
+        els.status.innerHTML = `Loaded <b>${state.entries.length}</b> entries. Phrase status: <code>${escapeHtml(state.topic.phrase_review_status)}</code>.`;
+        render();
+      } catch (error) {
+        els.status.textContent = `Unable to load topic: ${error.message}`;
+        els.entries.innerHTML = '<div class="empty">Check that the CiteGeist API bridge is running on 127.0.0.1:8765.</div>';
+      }
+    }
+
+    els.filter.addEventListener("input", render);
+    els.statusFilter.addEventListener("change", render);
+    loadTopic();
+  </script>
+</body>
+</html>

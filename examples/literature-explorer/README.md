@@ -128,3 +128,13 @@ This is sufficient to drive a demonstration app that can:
 - render local citation neighborhoods from `graph()` JSON payloads.
 
 For a first demo, the strongest path is topic exploration rather than generic reference-manager behavior.
+
+Two static ancient-DNA snapshots demonstrate the candidate and review surfaces
+without requiring a live bridge:
+
+- `ancient-dna-paleogenomics-candidate.html`
+- `ancient-dna-paleogenomics-review.html`
+
+They contain public bibliographic metadata for interface review. They are
+examples, not canonical bibliography exports or evidence that the associated
+topic has completed scholarly review.

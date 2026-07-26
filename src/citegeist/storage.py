@@ -7,6 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
+from .confidence import ConfidenceAssessment
 
 IDENTIFIER_FIELDS = ("doi", "isbn", "issn", "pmid", "arxiv", "dblp", "oai", "openalex", "url")
 RELATION_FIELDS = {
@@ -141,6 +142,27 @@ class BibliographyStore:
                 recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS confidence_assessments (
+                assessment_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL,
+                dimension TEXT NOT NULL,
+                value REAL,
+                band TEXT NOT NULL DEFAULT 'unknown',
+                schema_version TEXT NOT NULL DEFAULT '1.0',
+                assessor_id TEXT NOT NULL DEFAULT '',
+                method_name TEXT NOT NULL,
+                method_version TEXT NOT NULL,
+                policy_id TEXT NOT NULL DEFAULT '',
+                basis_record_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_family_ids_json TEXT NOT NULL DEFAULT '[]',
+                basis_hash TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                valid_at TEXT NOT NULL DEFAULT '',
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                supersedes_assessment_id TEXT NOT NULL DEFAULT '',
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+
             CREATE TABLE IF NOT EXISTS field_conflicts (
                 id INTEGER PRIMARY KEY,
                 entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
@@ -171,6 +193,73 @@ class BibliographyStore:
                 """
             )
         self.connection.commit()
+
+    def upsert_confidence_assessment(self, assessment: ConfidenceAssessment) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO confidence_assessments (
+                assessment_id, subject_id, dimension, value, band, schema_version,
+                assessor_id, method_name, method_version, policy_id,
+                basis_record_ids_json, source_family_ids_json, basis_hash,
+                rationale, valid_at, recorded_at, supersedes_assessment_id, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(assessment_id) DO UPDATE SET
+                subject_id = excluded.subject_id,
+                dimension = excluded.dimension,
+                value = excluded.value,
+                band = excluded.band,
+                schema_version = excluded.schema_version,
+                assessor_id = excluded.assessor_id,
+                method_name = excluded.method_name,
+                method_version = excluded.method_version,
+                policy_id = excluded.policy_id,
+                basis_record_ids_json = excluded.basis_record_ids_json,
+                source_family_ids_json = excluded.source_family_ids_json,
+                basis_hash = excluded.basis_hash,
+                rationale = excluded.rationale,
+                valid_at = excluded.valid_at,
+                recorded_at = excluded.recorded_at,
+                supersedes_assessment_id = excluded.supersedes_assessment_id,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                assessment.assessment_id,
+                assessment.subject_id,
+                assessment.dimension,
+                assessment.value,
+                assessment.band,
+                assessment.schema_version,
+                assessment.assessor_id,
+                assessment.method.name,
+                assessment.method.version,
+                assessment.method.policy_id,
+                json.dumps(assessment.basis_record_ids),
+                json.dumps(assessment.source_family_ids),
+                assessment.basis_hash,
+                assessment.rationale,
+                assessment.valid_at,
+                assessment.recorded_at,
+                assessment.supersedes_assessment_id,
+                json.dumps(assessment.metadata, sort_keys=True),
+            ),
+        )
+        self.connection.commit()
+
+    def list_confidence_assessments(self, subject_id: str | None = None) -> list[dict[str, object]]:
+        if subject_id is None:
+            rows = self.connection.execute(
+                "SELECT * FROM confidence_assessments ORDER BY subject_id, dimension, recorded_at, assessment_id"
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                """
+                SELECT * FROM confidence_assessments
+                WHERE subject_id = ?
+                ORDER BY dimension, recorded_at, assessment_id
+                """,
+                (subject_id,),
+            ).fetchall()
+        return [_assessment_row_payload(row) for row in rows]
 
     def ingest_bibtex(
         self,
@@ -1333,3 +1422,28 @@ def _split_relation_values(value: str) -> list[str]:
 
 def _entry_to_bibtex(entry: BibEntry) -> str:
     return render_bibtex([entry])
+
+
+def _assessment_row_payload(row: sqlite3.Row) -> dict[str, object]:
+    return {
+        "schema_version": row["schema_version"],
+        "assessment_id": row["assessment_id"],
+        "subject_id": row["subject_id"],
+        "dimension": row["dimension"],
+        "value": row["value"],
+        "band": row["band"],
+        "assessor_id": row["assessor_id"],
+        "method": {
+            "name": row["method_name"],
+            "version": row["method_version"],
+            "policy_id": row["policy_id"],
+        },
+        "basis_record_ids": json.loads(row["basis_record_ids_json"] or "[]"),
+        "source_family_ids": json.loads(row["source_family_ids_json"] or "[]"),
+        "basis_hash": row["basis_hash"],
+        "rationale": row["rationale"],
+        "valid_at": row["valid_at"],
+        "recorded_at": row["recorded_at"],
+        "supersedes_assessment_id": row["supersedes_assessment_id"],
+        "metadata": json.loads(row["metadata_json"] or "{}"),
+    }

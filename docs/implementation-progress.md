@@ -1,6 +1,6 @@
 # CiteGeist Sources-First Progress
 
-**Last Updated:** 2026-04-25
+**Last Updated:** 2026-07-25
 
 This document tracks the refocused plan for source incorporation. The working question is which additional open bibliographic sources CiteGeist should integrate next, not whether it needs a new storage platform first.
 
@@ -112,6 +112,18 @@ These are already sufficient for a credible local enrichment-and-discovery workf
 - pgvector integration
 - embedding-first retrieval
 - broad canonical-work reconstruction
+
+## Unified Confidence Work
+
+**Status:** Partial and unreleased
+
+The local working tree now contains a versioned assessment table, typed
+bibliographic identity assessments, a dry-run-first migration function, and
+OKF assessment rendering. This is not a completed CG3 migration: the CLI
+surface, backup/rollback, portable interval storage, reviewed match outcomes,
+calibration, and Epistemap graph export remain. See Epistemap
+`docs/confidence-overhaul-implementation-status.md` for the audited
+cross-repository phase matrix.
 
 ---
 

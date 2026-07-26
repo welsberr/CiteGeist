@@ -11,6 +11,8 @@ SESSION_*
 topic-*
 talkorigins-out/
 talkorigins.sqlite3
+talkorigins.sqlite3.bak-*
+build/
 to_batch.sh*
 transfer/
 evo-edu-*

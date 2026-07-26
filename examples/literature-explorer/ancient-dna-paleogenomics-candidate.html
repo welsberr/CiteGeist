@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ancient DNA and paleogenomics bibliography - TalkOrigins Archive candidate</title>
+  <meta name="description" content="Candidate TalkOrigins Archive bibliography topic for ancient DNA and paleogenomics.">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1eb;
+      --paper: #fffdf8;
+      --ink: #24211d;
+      --muted: #70695f;
+      --line: #d9d0c3;
+      --accent: #1d6872;
+      --accent-soft: #e1eff1;
+      --warn: #7b5400;
+      --warn-soft: #fff3d4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.55 Georgia, "Times New Roman", serif;
+    }
+    a { color: var(--accent); }
+    code, pre, .meta, .stats, .button-row, .candidate-note {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .site-header {
+      background: #1f2528;
+      color: #f8f4ed;
+      border-bottom: 4px solid var(--accent);
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .brand-kicker {
+      margin: 0;
+      color: #cdd8da;
+      font: 12px/1.2 system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .brand-title {
+      margin: 4px 0 0;
+      font: 26px/1.15 Georgia, serif;
+    }
+    .candidate-note {
+      margin: 16px 0 0;
+      padding: 10px 12px;
+      background: var(--warn-soft);
+      color: var(--warn);
+      border: 1px solid #e2cb8a;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .topic-header {
+      background: var(--paper);
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font: 12px/1.2 system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    h1 {
+      margin: 0;
+      font-size: 36px;
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    .meta {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .topic-summary {
+      max-width: 880px;
+      margin: 18px 0 0;
+      font-size: 18px;
+    }
+    .description-status {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 20px 0 0;
+    }
+    .stats div {
+      border: 1px solid var(--line);
+      background: #fbf8f1;
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .stats dt {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .stats dd {
+      margin: 4px 0 0;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0 0;
+    }
+    button, .button-link {
+      border: 1px solid #1a5961;
+      border-radius: 4px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 7px 12px;
+      font: 14px/1.2 system-ui, sans-serif;
+      text-decoration: none;
+    }
+    .secondary {
+      background: #fff;
+      color: var(--accent);
+    }
+    .article-body {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .citation {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      margin: 0 0 12px;
+      padding: 14px 16px;
+    }
+    .citation-text {
+      margin: 0;
+    }
+    .number {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .links {
+      margin: 8px 0 0;
+      font-size: 14px;
+    }
+    .review-flags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+      font: 12px/1.2 system-ui, sans-serif;
+    }
+    .pill {
+      border: 1px solid #c4dde0;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #164d54;
+      padding: 3px 8px;
+    }
+    .pill.draft {
+      border-color: #e2cb8a;
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+    .details {
+      margin-top: 10px;
+    }
+    details {
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+      margin-top: 8px;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--accent);
+      font: 14px/1.2 system-ui, sans-serif;
+    }
+    pre {
+      overflow: auto;
+      background: #f8f5ef;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 10px;
+      white-space: pre-wrap;
+      font-size: 13px;
+    }
+    .loading, .empty {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 18px;
+      color: var(--muted);
+      font-family: system-ui, sans-serif;
+    }
+    @media (max-width: 760px) {
+      .wrap, .article-body { padding: 18px; }
+      h1 { font-size: 28px; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topic-summary { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <p class="brand-kicker">public archive</p>
+      <p class="brand-title">TalkOrigins Archive</p>
+      <p class="candidate-note">Candidate bibliography topic generated for local editorial review. This page is not yet installed in the public Archive tree.</p>
+    </div>
+  </header>
+
+  <section class="topic-header">
+    <div class="wrap">
+      <p class="eyebrow">TalkOrigins Bibliography Topic Candidate</p>
+      <h1>Ancient DNA and paleogenomics</h1>
+      <p class="meta"><a href="/origins/biblio/">Bibliography index</a> · proposed route <code>/origins/biblio/ancient_dna_paleogenomics.html</code></p>
+      <p class="topic-summary"><em>Ancient DNA and paleogenomics</em> covers the recovery, authentication, and analysis of DNA from ancient biological material, with emphasis on extinct hominin genomes, Neanderthal and Denisovan ancestry, ancient population history, and the methods used to distinguish endogenous ancient molecules from contamination and damage. The topic complements the Archive’s existing human evolution, DNA, genetics, and paleoanthropology bibliographies by gathering direct genomic evidence that became central after many classic TalkOrigins pages were written.</p>
+      <p class="description-status">Candidate description pending editorial review.</p>
+      <dl class="stats" aria-label="Topic statistics">
+        <div><dt>Citations</dt><dd id="citation-count">0</dd></div>
+        <div><dt>DOIs</dt><dd id="doi-count">0</dd></div>
+        <div><dt>Abstracts</dt><dd id="abstract-count">0</dd></div>
+        <div><dt>Draft records</dt><dd id="draft-count">0</dd></div>
+      </dl>
+      <p class="button-row">
+        <button id="download-bibtex" type="button">Download candidate BibTeX</button>
+        <button class="secondary" id="toggle-details" type="button">Open all BibTeX blocks</button>
+      </p>
+    </div>
+  </section>
+
+  <main class="article-body bibliography-body bibliography-page">
+    <div id="status" class="loading">Loading candidate topic from local CiteGeist...</div>
+    <section id="citations" aria-label="Candidate citations"></section>
+  </main>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8765";
+    const TOPIC_SLUG = "ancient-dna-paleogenomics";
+    const state = { entries: [], enriched: [], bibtex: "", detailsOpen: false };
+
+    const els = {
+      status: document.getElementById("status"),
+      citations: document.getElementById("citations"),
+      citationCount: document.getElementById("citation-count"),
+      doiCount: document.getElementById("doi-count"),
+      abstractCount: document.getElementById("abstract-count"),
+      draftCount: document.getElementById("draft-count"),
+      downloadBibtex: document.getElementById("download-bibtex"),
+      toggleDetails: document.getElementById("toggle-details"),
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    async function call(method, params = {}) {
+      const response = await fetch(`${API_BASE}/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method, params }),
+      });
+      const payload = await response.json();
+      if (!payload.ok) throw new Error(payload.error || "CiteGeist call failed");
+      return payload.result;
+    }
+
+    function authorLead(entry) {
+      const bibtex = entry.bibtex || entry.raw_bibtex || "";
+      const match = bibtex.match(/author\s*=\s*[{"]([^}"]+)/i);
+      if (!match) return "";
+      return match[1].replace(/\s+and\s+/g, "; ");
+    }
+
+    function citationText(entry, index) {
+      const authors = authorLead(entry);
+      const parts = [];
+      if (authors) parts.push(authors);
+      if (entry.year) parts.push(entry.year);
+      if (entry.title) parts.push(entry.title);
+      const venue = entry.journal || entry.booktitle || entry.publisher;
+      if (venue) parts.push(venue);
+      return `<span class="number">${index + 1}.</span> ${escapeHtml(parts.join(", "))}.`;
+    }
+
+    function render() {
+      const entries = state.enriched;
+      const doiCount = entries.filter((entry) => entry.doi).length;
+      const abstractCount = entries.filter((entry) => entry.abstract).length;
+      const draftCount = entries.filter((entry) => entry.review_status === "draft").length;
+
+      els.citationCount.textContent = String(entries.length);
+      els.doiCount.textContent = String(doiCount);
+      els.abstractCount.textContent = String(abstractCount);
+      els.draftCount.textContent = String(draftCount);
+
+      if (!entries.length) {
+        els.citations.innerHTML = '<div class="empty">No candidate entries loaded.</div>';
+        return;
+      }
+
+      els.citations.innerHTML = entries.map((entry, index) => {
+        const doiLink = entry.doi
+          ? `<p class="links"><a href="https://doi.org/${escapeHtml(entry.doi)}">DOI: ${escapeHtml(entry.doi)}</a></p>`
+          : "";
+        const abstract = entry.abstract
+          ? `<details><summary>Abstract</summary><p>${escapeHtml(entry.abstract)}</p></details>`
+          : "";
+        const bibtex = entry.bibtex
+          ? `<details class="bibtex-detail"${state.detailsOpen ? " open" : ""}><summary>BibTeX</summary><pre>${escapeHtml(entry.bibtex)}</pre></details>`
+          : "";
+        const statusClass = entry.review_status === "draft" ? "pill draft" : "pill";
+        return `
+          <article class="citation" id="${escapeHtml(entry.citation_key)}">
+            <p class="citation-text">${citationText(entry, index)}</p>
+            ${doiLink}
+            <div class="review-flags">
+              <span class="${statusClass}">${escapeHtml(entry.review_status || "unknown")}</span>
+              <span class="pill">${escapeHtml(entry.citation_key)}</span>
+            </div>
+            <div class="details">${abstract}${bibtex}</div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadCandidate() {
+      try {
+        const topic = await call("get_topic", { topic_slug: TOPIC_SLUG, entry_limit: 200 });
+        state.entries = topic.entries || [];
+        els.status.textContent = `Loading ${state.entries.length} full citation records...`;
+        state.enriched = await Promise.all(state.entries.map((entry) => (
+          call("show_entry", {
+            citation_key: entry.citation_key,
+            include_bibtex: true,
+          }).then((full) => ({ ...entry, ...full }))
+        )));
+        const exported = await call("export_topic_bibtex", { topic_slug: TOPIC_SLUG });
+        state.bibtex = exported.bibtex || "";
+        els.status.remove();
+        render();
+      } catch (error) {
+        els.status.textContent = `Unable to load candidate page: ${error.message}. Confirm that the local CiteGeist API is running at ${API_BASE}.`;
+      }
+    }
+
+    els.downloadBibtex.addEventListener("click", () => {
+      const blob = new Blob([state.bibtex], { type: "application/x-bibtex" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "ancient-dna-paleogenomics.bib";
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
+    els.toggleDetails.addEventListener("click", () => {
+      state.detailsOpen = !state.detailsOpen;
+      els.toggleDetails.textContent = state.detailsOpen ? "Close all BibTeX blocks" : "Open all BibTeX blocks";
+      render();
+    });
+
+    loadCandidate();
+  </script>
+</body>
+</html>
