@@ -5,11 +5,13 @@ from .bootstrap import BootstrapResult, Bootstrapper
 from .confidence import (
     AssessmentMethodRef,
     ConfidenceAssessment,
+    ConfidenceInterval,
     band_for_value,
+    create_confidence_migration_backup,
     identity_resolution_assessment,
     migrate_legacy_confidence_assessments,
+    restore_confidence_migration_backup,
 )
-from .confidence import AssessmentMethodRef, ConfidenceAssessment, identity_resolution_assessment
 from .expand import CrossrefExpander, OpenAlexExpander, OpenCitationsExpander
 from .extract import (
     available_extraction_backends,
@@ -43,7 +45,7 @@ __all__ = [
     "Bootstrapper",
     "CrossrefExpander",
     "ConfidenceAssessment",
-    "ConfidenceAssessment",
+    "ConfidenceInterval",
     "LiteratureExplorerApi",
     "MetadataResolver",
     "OpenAlexExpander",
@@ -64,9 +66,9 @@ __all__ = [
     "band_for_value",
     "check_extraction_comparison_summary",
     "compare_extraction_backends",
+    "create_confidence_migration_backup",
     "extract_references",
     "get_extraction_backend",
-    "identity_resolution_assessment",
     "identity_resolution_assessment",
     "load_batch_jobs",
     "merge_entries",
@@ -74,5 +76,6 @@ __all__ = [
     "migrate_legacy_confidence_assessments",
     "parse_bibtex",
     "register_extraction_backend",
+    "restore_confidence_migration_backup",
     "summarize_extraction_comparison",
 ]

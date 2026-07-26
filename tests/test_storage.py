@@ -1,4 +1,12 @@
-from citegeist import BibliographyStore, ConfidenceAssessment, AssessmentMethodRef, migrate_legacy_confidence_assessments, parse_bibtex
+from citegeist import (
+    AssessmentMethodRef,
+    BibliographyStore,
+    ConfidenceAssessment,
+    ConfidenceInterval,
+    migrate_legacy_confidence_assessments,
+    parse_bibtex,
+    restore_confidence_migration_backup,
+)
 
 
 SAMPLE_BIB = """
@@ -62,6 +70,7 @@ def test_store_persists_typed_confidence_assessments_and_preserves_zero():
             dimension="identity_resolution",
             value=0.0,
             band="very_low",
+            interval=ConfidenceInterval(level=0.95, lower=0.0, upper=0.1, method="fixture_exact"),
             method=AssessmentMethodRef(name="fixture", version="1.0", policy_id="test"),
             recorded_at="2026-07-25T12:00:00+00:00",
         )
@@ -72,33 +81,60 @@ def test_store_persists_typed_confidence_assessments_and_preserves_zero():
 
         assert len(rows) == 1
         assert rows[0]["value"] == 0.0
+        assert rows[0]["interval"] == {"level": 0.95, "lower": 0.0, "upper": 0.1, "method": "fixture_exact"}
         assert rows[0]["dimension"] == "identity_resolution"
         assert rows[0]["method"]["policy_id"] == "test"
     finally:
         store.close()
 
 
-def test_confidence_migration_is_dry_run_first_and_idempotent(tmp_path):
+def test_confidence_migration_is_dry_run_first_idempotent_and_restorable(tmp_path):
     from citegeist.okf_export import export_okf_bundle
 
-    store = BibliographyStore()
+    db_path = tmp_path / "library.sqlite3"
+    backup_path = tmp_path / "confidence-backup.sqlite3"
+    store = BibliographyStore(db_path)
     try:
         store.ingest_bibtex(SAMPLE_BIB)
         dry_run = migrate_legacy_confidence_assessments(store)
         assert dry_run["apply"] is False
         assert dry_run["candidate_count"] > 0
+        assert dry_run["source_rows"]
+        assert any(item["field"] == "claim_support.needs_support_score" for item in dry_run["ambiguous_legacy_fields"])
         assert store.list_confidence_assessments() == []
 
-        applied = migrate_legacy_confidence_assessments(store, apply=True)
-        reapplied = migrate_legacy_confidence_assessments(store, apply=True)
+        applied = migrate_legacy_confidence_assessments(store, apply=True, backup_path=backup_path)
+        reapplied = migrate_legacy_confidence_assessments(store, apply=True, backup_path=backup_path)
         assert applied["candidate_count"] == reapplied["candidate_count"]
         assert len(store.list_confidence_assessments()) == applied["candidate_count"]
+        assert backup_path.exists()
 
         export_okf_bundle(store, tmp_path)
         work_page = (tmp_path / "works" / "smith2024graphs.md").read_text(encoding="utf-8")
         manifest = (tmp_path / "manifest.json").read_text(encoding="utf-8")
         assert "## Confidence Assessments" in work_page
         assert "citegeist.confidence_assessments.v1" in manifest
+    finally:
+        store.close()
+
+    restore_confidence_migration_backup(db_path, backup_path)
+    restored = BibliographyStore(db_path)
+    try:
+        assert restored.list_confidence_assessments() == []
+    finally:
+        restored.close()
+
+
+def test_confidence_migration_apply_requires_backup():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(SAMPLE_BIB)
+        try:
+            migrate_legacy_confidence_assessments(store, apply=True)
+        except ValueError as exc:
+            assert "backup_path" in str(exc)
+        else:
+            raise AssertionError("apply without backup_path should fail")
     finally:
         store.close()
 

@@ -11,6 +11,7 @@ from .batch import BatchBootstrapRunner, load_batch_jobs
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .claim_support import analyze_support_gaps
+from .confidence import migrate_legacy_confidence_assessments, restore_confidence_migration_backup
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
 from .notebook_export import export_notebook_topic_bundle
@@ -201,6 +202,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum sentence length to consider as a claim candidate",
     )
     support_claims_parser.add_argument("--output", help="Write JSON results to a file instead of stdout")
+
+    confidence_migrate_parser = subparsers.add_parser(
+        "confidence-migrate",
+        help="Dry-run or apply migration from legacy confidence columns to typed assessments",
+    )
+    confidence_migrate_parser.add_argument("--apply", action="store_true", help="Apply the migration")
+    confidence_migrate_parser.add_argument("--report", required=True, help="Path to write the JSON migration report")
+    confidence_migrate_parser.add_argument(
+        "--backup",
+        help="Required with --apply; path for a SQLite backup before migration",
+    )
+
+    confidence_restore_parser = subparsers.add_parser(
+        "confidence-restore",
+        help="Restore a database from a confidence migration backup",
+    )
+    confidence_restore_parser.add_argument("backup", help="Backup database path to restore")
+    confidence_restore_parser.add_argument("--report", required=True, help="Path to write the JSON restore report")
 
     resolve_parser = subparsers.add_parser("resolve", help="Enrich stored entries from external metadata sources")
     resolve_parser.add_argument("citation_keys", nargs="+", help="Citation keys to enrich")
@@ -744,6 +763,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "confidence-restore":
+        return _run_confidence_restore(Path(args.db), Path(args.backup), Path(args.report))
+
     store = BibliographyStore(args.db)
     try:
         if args.command == "ingest":
@@ -808,6 +830,13 @@ def main(argv: list[str] | None = None) -> int:
                 args.max_claims,
                 args.min_claim_chars,
                 args.output,
+            )
+        if args.command == "confidence-migrate":
+            return _run_confidence_migrate(
+                store,
+                apply=args.apply,
+                report_path=Path(args.report),
+                backup_path=Path(args.backup) if args.backup else None,
             )
         if args.command == "resolve":
             return _run_resolve(store, args.citation_keys)
@@ -1310,6 +1339,31 @@ def _run_support_claims(
         Path(output).write_text(rendered + "\n", encoding="utf-8")
     else:
         print(rendered)
+    return 0
+
+
+def _run_confidence_migrate(
+    store: BibliographyStore,
+    *,
+    apply: bool,
+    report_path: Path,
+    backup_path: Path | None,
+) -> int:
+    if apply and backup_path is None:
+        print("confidence-migrate --apply requires --backup", file=sys.stderr)
+        return 2
+    report = migrate_legacy_confidence_assessments(store, apply=apply, backup_path=backup_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({"report": str(report_path), "apply": apply, "candidate_count": report["candidate_count"]}))
+    return 0
+
+
+def _run_confidence_restore(database_path: Path, backup_path: Path, report_path: Path) -> int:
+    report = restore_confidence_migration_backup(database_path, backup_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({"report": str(report_path), "restored": True}))
     return 0
 
 

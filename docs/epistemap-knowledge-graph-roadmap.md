@@ -1,7 +1,7 @@
 # Epistemap Knowledge-Graph Roadmap For CiteGeist
 
-**Status:** in progress; confidence phase CG3 is partial and other phases retain
-their phase-specific status below
+**Status:** in progress; confidence phase CG3 has W5 migration CLI coverage
+locally and other phases retain their phase-specific status below
 **Primary implementation repository:** CiteGeist
 **Shared dependency:** Epistemap
 **Interacting repositories:** GroundRecall and Didactopus
@@ -24,6 +24,17 @@ CiteGeist is already a graph system:
 Epistemap can make those graph operations portable, inspectable, temporal, and
 consistent with the rest of the repository ecosystem. It should not replace
 CiteGeist's SQLite store or become a truth-ranking engine.
+
+Confidence migration status:
+
+- `confidence-migrate` now supports dry-run reports by default.
+- `confidence-migrate --apply --backup BACKUP --report REPORT.json` applies the
+  migration transactionally after creating or reusing an explicit backup.
+- `confidence-restore BACKUP --report REPORT.json` restores the SQLite database
+  from a migration backup.
+- Typed assessment storage preserves the portable interval shape.
+- Support-gap priority and query-scoped retrieval scores remain reported as
+  non-confidence fields rather than migrated assessments.
 
 The most useful integration is:
 

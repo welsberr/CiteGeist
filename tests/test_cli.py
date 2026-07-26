@@ -79,6 +79,52 @@ def test_cli_ingest_show_search_and_export(tmp_path: Path):
     assert "@article{smith2024graphs," in exported
 
 
+def test_cli_confidence_migrate_dry_run_apply_and_restore(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(SAMPLE_BIB, encoding="utf-8")
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    dry_report = tmp_path / "dry-run.json"
+    dry_run = run_cli(tmp_path, "confidence-migrate", "--report", str(dry_report))
+    assert dry_run.returncode == 0
+    dry_payload = json.loads(dry_report.read_text(encoding="utf-8"))
+    assert dry_payload["apply"] is False
+    assert dry_payload["candidate_count"] > 0
+
+    missing_backup = run_cli(
+        tmp_path,
+        "confidence-migrate",
+        "--apply",
+        "--report",
+        str(tmp_path / "missing-backup.json"),
+    )
+    assert missing_backup.returncode == 2
+    assert "requires --backup" in missing_backup.stderr
+
+    apply_report = tmp_path / "apply.json"
+    backup = tmp_path / "confidence-backup.sqlite3"
+    applied = run_cli(
+        tmp_path,
+        "confidence-migrate",
+        "--apply",
+        "--backup",
+        str(backup),
+        "--report",
+        str(apply_report),
+    )
+    assert applied.returncode == 0
+    assert backup.exists()
+    assert json.loads(apply_report.read_text(encoding="utf-8"))["apply"] is True
+
+    restored_report = tmp_path / "restore.json"
+    restored = run_cli(tmp_path, "confidence-restore", str(backup), "--report", str(restored_report))
+    assert restored.returncode == 0
+    assert json.loads(restored_report.read_text(encoding="utf-8"))["restored"] is True
+
+    post_restore = run_cli(tmp_path, "confidence-migrate", "--report", str(tmp_path / "post-restore.json"))
+    assert post_restore.returncode == 0
+
+
 def test_cli_export_skips_stub_entries_by_default_but_can_include_them(tmp_path: Path):
     bib_path = tmp_path / "input.bib"
     bib_path.write_text(

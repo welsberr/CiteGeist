@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+import shutil
+import sqlite3
 from typing import Any
 
 
@@ -25,6 +28,22 @@ class AssessmentMethodRef:
 
 
 @dataclass(slots=True)
+class ConfidenceInterval:
+    level: float
+    lower: float
+    upper: float
+    method: str
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.level <= 1.0:
+            raise ValueError(f"interval level must be between 0 and 1: {self.level}")
+        if not 0.0 <= self.lower <= 1.0 or not 0.0 <= self.upper <= 1.0:
+            raise ValueError("interval bounds must be between 0 and 1")
+        if self.lower > self.upper:
+            raise ValueError("interval lower must be <= upper")
+
+
+@dataclass(slots=True)
 class ConfidenceAssessment:
     assessment_id: str
     subject_id: str
@@ -33,6 +52,7 @@ class ConfidenceAssessment:
     method: AssessmentMethodRef
     schema_version: str = "1.0"
     band: str = "unknown"
+    interval: ConfidenceInterval | None = None
     assessor_id: str = ""
     basis_record_ids: list[str] = field(default_factory=list)
     source_family_ids: list[str] = field(default_factory=list)
@@ -56,6 +76,8 @@ class ConfidenceAssessment:
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["method"] = asdict(self.method)
+        if self.interval is not None:
+            payload["interval"] = asdict(self.interval)
         return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
 
 
@@ -96,7 +118,15 @@ def identity_resolution_assessment(
     )
 
 
-def migrate_legacy_confidence_assessments(store, *, apply: bool = False) -> dict[str, Any]:
+MIGRATION_VERSION = "citegeist_confidence_migration_v1"
+
+
+def migrate_legacy_confidence_assessments(
+    store,
+    *,
+    apply: bool = False,
+    backup_path: str | Path | None = None,
+) -> dict[str, Any]:
     """Map CiteGeist legacy confidence columns into typed assessments.
 
     The migration is dry-run by default and idempotent when applied. It maps
@@ -112,9 +142,16 @@ def migrate_legacy_confidence_assessments(store, *, apply: bool = False) -> dict
     report = {
         "report_kind": "citegeist_confidence_migration_report",
         "schema_version": "1.0",
+        "migration_version": MIGRATION_VERSION,
         "apply": apply,
+        "backup_path": str(backup_path) if backup_path is not None else "",
         "candidate_count": len(candidates),
         "assessment_ids": [item.assessment_id for item in candidates],
+        "source_rows": [
+            item.metadata.get("source_row", {})
+            for item in candidates
+            if item.metadata.get("source_row")
+        ],
         "ambiguous_legacy_fields": [
             {
                 "field": "claim_support.needs_support_score",
@@ -127,9 +164,53 @@ def migrate_legacy_confidence_assessments(store, *, apply: bool = False) -> dict
         ],
     }
     if apply:
-        for assessment in candidates:
-            store.upsert_confidence_assessment(assessment)
+        if backup_path is None:
+            raise ValueError("apply requires an explicit backup_path")
+        create_confidence_migration_backup(store, backup_path)
+        try:
+            store.connection.execute("BEGIN")
+            for assessment in candidates:
+                store.upsert_confidence_assessment(assessment, commit=False)
+            store.record_confidence_migration_event(
+                migration_version=MIGRATION_VERSION,
+                backup_path=str(backup_path),
+                report=report,
+                commit=False,
+            )
+            store.connection.commit()
+        except Exception:
+            store.connection.rollback()
+            raise
     return report
+
+
+def create_confidence_migration_backup(store, backup_path: str | Path) -> str:
+    if store.path == ":memory:":
+        raise ValueError("cannot create a filesystem backup for an in-memory database")
+    backup = Path(backup_path)
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    if backup.exists():
+        return str(backup)
+    destination = sqlite3.connect(str(backup))
+    try:
+        store.connection.backup(destination)
+    finally:
+        destination.close()
+    return str(backup)
+
+
+def restore_confidence_migration_backup(database_path: str | Path, backup_path: str | Path) -> dict[str, Any]:
+    database = Path(database_path)
+    backup = Path(backup_path)
+    if not backup.exists():
+        raise FileNotFoundError(str(backup))
+    shutil.copy2(backup, database)
+    return {
+        "report_kind": "citegeist_confidence_restore_report",
+        "database_path": str(database),
+        "backup_path": str(backup),
+        "restored": True,
+    }
 
 
 def _field_provenance_assessments(store) -> list[ConfidenceAssessment]:
@@ -158,7 +239,12 @@ def _field_provenance_assessments(store) -> list[ConfidenceAssessment]:
             basis_record_ids=[f"field_provenance::{row['id']}"],
             rationale=f"Field `{row['field_name']}` migrated from legacy field_provenance confidence.",
             recorded_at=str(row["recorded_at"]),
-            metadata={"field_name": row["field_name"], "source_label": row["source_label"]},
+            metadata={
+                "field_name": row["field_name"],
+                "source_label": row["source_label"],
+                "source_row": {"table": "field_provenance", "id": row["id"]},
+                "migration_version": MIGRATION_VERSION,
+            },
         )
         for row in rows
     ]
@@ -191,7 +277,11 @@ def _relation_provenance_assessments(store) -> list[ConfidenceAssessment]:
             basis_record_ids=[f"relation_provenance::{row['id']}"],
             rationale="Relation provenance confidence migrated as grounding strength, not claim support.",
             recorded_at=str(row["recorded_at"]),
-            metadata={"source_label": row["source_label"]},
+            metadata={
+                "source_label": row["source_label"],
+                "source_row": {"table": "relation_provenance", "id": row["id"]},
+                "migration_version": MIGRATION_VERSION,
+            },
         )
         for row in rows
     ]
@@ -224,7 +314,16 @@ def _topic_membership_assessments(store) -> list[ConfidenceAssessment]:
             basis_record_ids=[f"topic::{row['slug']}"],
             rationale="Topic membership confidence migrated as CiteGeist topic relevance.",
             recorded_at=str(row["created_at"]),
-            metadata={"topic_slug": row["slug"], "source_label": row["source_label"]},
+            metadata={
+                "topic_slug": row["slug"],
+                "source_label": row["source_label"],
+                "source_row": {
+                    "table": "entry_topics",
+                    "citation_key": row["citation_key"],
+                    "topic_slug": row["slug"],
+                },
+                "migration_version": MIGRATION_VERSION,
+            },
         )
         for row in rows
     ]
