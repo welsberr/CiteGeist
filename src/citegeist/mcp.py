@@ -11,7 +11,7 @@ from .app_api import LiteratureExplorerApi
 from .storage import BibliographyStore
 
 
-SERVER_INFO = {"name": "citegeist-mcp", "version": "0.1.0"}
+SERVER_INFO = {"name": "citegeist-mcp", "version": "0.1.1"}
 
 
 def _json_text(payload: Any) -> dict[str, Any]:
