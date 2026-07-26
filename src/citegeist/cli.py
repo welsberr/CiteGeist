@@ -12,6 +12,7 @@ from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .bootstrap import Bootstrapper
 from .claim_support import analyze_support_gaps
 from .confidence import migrate_legacy_confidence_assessments, restore_confidence_migration_backup
+from .epistemap_export import write_epistemap_graph_profile
 from .examples.talkorigins import TalkOriginsScraper
 from .expand import CrossrefExpander, OpenAlexExpander, TopicExpander, _expand_relation_types
 from .notebook_export import export_notebook_topic_bundle
@@ -290,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     graph_view_parser.add_argument("input", help="Path to a graph JSON file exported with --format json-graph")
     graph_view_parser.add_argument("--output", required=True, help="Path to write the HTML viewer")
     graph_view_parser.add_argument("--title", default="CiteGeist Graph View", help="HTML page title")
+
+    export_epistemap_parser = subparsers.add_parser(
+        "export-epistemap",
+        help="Export a deterministic Epistemap-compatible bibliography graph profile",
+    )
+    export_epistemap_parser.add_argument("output", help="Path to write the Epistemap graph profile JSON")
+    export_epistemap_parser.add_argument("--topic", help="Optional topic slug to restrict the export")
 
     expand_parser = subparsers.add_parser("expand", help="Expand graph edges from external metadata sources")
     expand_parser.add_argument("citation_keys", nargs="+", help="Seed citation keys to expand")
@@ -890,6 +898,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "discover-oai":
             return _run_discover_oai(args.base_url)
+        if args.command == "export-epistemap":
+            write_epistemap_graph_profile(store, args.output, topic=args.topic)
+            print(args.output)
+            return 0
         if args.command == "bootstrap":
             return _run_bootstrap(
                 store,

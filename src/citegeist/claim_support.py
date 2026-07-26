@@ -110,7 +110,7 @@ def analyze_support_gaps(
         verification = verifier.verify_string(claim.text, context=context, limit=limit)
         candidates = [verification.entry, *[alt.entry for alt in verification.alternates]]
         sources = [verification.source_label, *[alt.source_label for alt in verification.alternates]]
-        scores = [verification.confidence, *[alt.score for alt in verification.alternates]]
+        scores = [verification.match_score, *[alt.score for alt in verification.alternates]]
 
         rendered: list[dict[str, object]] = []
         seen_titles: set[str] = set()

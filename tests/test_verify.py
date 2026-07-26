@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from citegeist.bibtex import BibEntry
 from citegeist.llm_verify import VerificationLlmConfig, _loads_lenient_json
 from citegeist.resolve import Resolution
@@ -32,7 +34,9 @@ def test_verifier_uses_direct_doi_resolution_for_bib_entries():
     )
 
     assert result.status == "exact"
-    assert result.confidence == 1.0
+    assert result.match_score == 1.0
+    with pytest.warns(DeprecationWarning, match="match_score"):
+        assert result.confidence == 1.0
     assert result.entry.fields["title"] == "Resolved Work"
     assert result.source_label == "crossref:doi:10.1000/example"
 
@@ -101,6 +105,7 @@ def test_verifier_scores_and_sorts_search_candidates():
     assert result.status in {"high_confidence", "exact"}
     assert result.alternates[0].entry.citation_key == "weaker"
     payload = result.to_dict()
+    assert payload["match_score"] == payload["confidence"]
     assert payload["assessments"][0]["dimension"] == "identity_resolution"
     assert payload["assessments"][0]["rationale"] == "Bibliographic match score; not source reliability or claim support."
     assert payload["alternates"][0]["score"] == payload["assessments"][1]["value"]
