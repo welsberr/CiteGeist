@@ -225,6 +225,53 @@ Near-term follow-up for this demo surface:
 - improve graph review beyond the current lightweight SVG overview;
 - keep payload contracts stable enough that the demo can double as an evaluation harness for parser and discovery changes.
 
+## MCP Adapter Surface
+
+Priority: P1
+
+Goal:
+Expose CiteGeist's local bibliography workbench through Model Context Protocol
+(MCP) tools so assistants can help with source discovery and review without
+bypassing bibliographic provenance or review state.
+
+Initial tools:
+
+- `citegeist.search`: scoped search over local entries, identifiers, creators,
+  topics, and relation metadata;
+- `citegeist.verify_reference`: verify a raw reference string or partial
+  BibTeX entry using the existing resolver stack and return ranked candidates
+  with match scores and provenance;
+- `citegeist.extract_references`: parse a bibliography section into draft
+  entries with parser provenance and extraction assessments;
+- `citegeist.expand_topic`: run bounded topic/citation expansion and return
+  reviewable candidate works, not auto-accepted entries;
+- `citegeist.export_bundle`: export reviewed BibTeX, CSL-JSON, OKF, or
+  Epistemap-compatible graph bundles when explicitly requested.
+
+Design constraints:
+
+- MCP is an adapter over the existing CLI/library/database contract; it must
+  not replace the SQLite canonical store.
+- Tool calls that contact external metadata services must expose source label,
+  query basis, timestamp, rate-limit behavior, and unresolved/conflict state.
+- Verification `match_score`, extraction fidelity, topic relevance, and graph
+  topology remain separate assessment dimensions.
+- MCP tools may propose enrichment or relation changes, but reviewed status
+  changes require an explicit review operation.
+- Export tools must preserve CiteGeist IDs and provenance so GroundRecall and
+  Didactopus can import reviewed source trails without treating citation
+  topology as claim truth.
+
+Acceptance criteria:
+
+- versioned MCP schemas and golden response fixtures exist for search,
+  reference verification, extraction, topic expansion, and export;
+- MCP smoke tests cover offline/local-only behavior and at least one
+  network-enabled resolver path behind explicit configuration;
+- review-state and conflict metadata match CLI output for the same operations;
+- documentation includes safe assistant-use guidance for source suggestions,
+  unresolved references, and conflicting metadata.
+
 ## Phase 6: Corpus Acquisition Pipelines
 
 Priority: P2
