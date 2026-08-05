@@ -2032,6 +2032,12 @@ def test_cli_db_status_reports_empty_database(tmp_path: Path):
     assert payload["entries"] == 0
 
 
+def test_cli_search_index_status_alias_reports_empty_database(tmp_path: Path):
+    status = run_cli(tmp_path, "search-index", "status")
+    assert status.returncode == 0
+    assert json.loads(status.stdout)["health"] == "empty"
+
+
 def test_cli_graph_outputs_missing_targets(tmp_path: Path):
     bib_path = tmp_path / "graph.bib"
     bib_path.write_text(

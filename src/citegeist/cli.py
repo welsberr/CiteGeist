@@ -27,7 +27,7 @@ from .extract import (
 from .harvest import OaiPmhHarvester
 from .llm_verify import VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries_with_conflicts
-from .storage import BibliographyStore, SearchQueryError
+from .storage import BibliographyStore, SearchIndexError, SearchQueryError
 from .verify import BibliographyVerifier, render_verification_results
 
 
@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
         "db-status",
         help="Report database contents and read-only SQLite/FTS5 health checks",
     )
+
+    search_index_parser = subparsers.add_parser("search-index", help="Inspect or explicitly rebuild the FTS5 index")
+    search_index_subparsers = search_index_parser.add_subparsers(dest="search_index_command", required=True)
+    search_index_subparsers.add_parser("status", help="Run read-only database and FTS5 health checks")
+    rebuild_parser = search_index_subparsers.add_parser("rebuild", help="Back up and rebuild the FTS5 index")
+    rebuild_parser.add_argument("--backup", required=True, help="New path for the pre-rebuild SQLite backup")
 
     show_parser = subparsers.add_parser("show", help="Show one entry or list entries")
     show_parser.add_argument("citation_key", nargs="?", help="Citation key to show")
@@ -787,6 +793,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_search(store, args.query, args.limit, args.topic)
         if args.command == "db-status":
             return _run_db_status(store)
+        if args.command == "search-index":
+            if args.search_index_command == "status":
+                return _run_db_status(store)
+            return _run_rebuild_search_index(store, Path(args.backup))
         if args.command == "show":
             return _run_show(store, args.citation_key, args.limit, args.provenance, args.conflicts)
         if args.command == "export":
@@ -1057,6 +1067,16 @@ def _run_db_status(store: BibliographyStore) -> int:
     summary = store.database_summary()
     print(json.dumps(summary, indent=2))
     return 1 if summary["health"] == "degraded" else 0
+
+
+def _run_rebuild_search_index(store: BibliographyStore, backup_path: Path) -> int:
+    try:
+        summary = store.rebuild_search_index(backup_path)
+    except SearchIndexError as exc:
+        print(f"Search-index error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(summary, indent=2))
+    return 0 if summary["health"] != "degraded" else 1
 
 
 def _run_show(

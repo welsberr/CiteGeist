@@ -26,6 +26,10 @@ class SearchQueryError(SearchError, ValueError):
     """The supplied natural-language query cannot be searched."""
 
 
+class SearchIndexError(SearchError):
+    """The FTS5 index cannot be inspected or rebuilt safely."""
+
+
 def _compile_literal_fts_query(query: str) -> str:
     """Compile ordinary user text into a literal FTS5 phrase.
 
@@ -116,6 +120,43 @@ class BibliographyStore:
             "fts_orphan_rows": fts_orphan_count,
             "fts_integrity_error": fts_integrity_error,
         }
+
+    def rebuild_search_index(self, backup_path: str | Path) -> dict[str, object]:
+        """Back up and rebuild the standalone FTS5 index explicitly."""
+        if not self._fts5_enabled:
+            raise SearchIndexError("This SQLite build does not provide FTS5.")
+        summary = self.database_summary()
+        if summary["sqlite_integrity"] != "ok":
+            raise SearchIndexError("SQLite integrity check failed; refusing to rebuild the search index.")
+        if summary["foreign_key_violations"]:
+            raise SearchIndexError("Foreign-key violations exist; refusing to rebuild the search index.")
+        destination = Path(backup_path)
+        if destination.exists():
+            raise SearchIndexError(f"Backup path already exists: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # The FTS5 integrity-check command is an INSERT into the virtual table
+        # and can leave a read-only transaction open on the connection.
+        self.connection.commit()
+        backup = sqlite3.connect(str(destination))
+        try:
+            self.connection.backup(backup)
+        finally:
+            backup.close()
+        try:
+            self.connection.execute("BEGIN")
+            self.connection.execute("DELETE FROM entry_text_fts")
+            self.connection.execute(
+                """
+                INSERT INTO entry_text_fts (citation_key, title, abstract, fulltext)
+                SELECT citation_key, COALESCE(title, ''), COALESCE(abstract, ''), COALESCE(fulltext, '')
+                FROM entries
+                """
+            )
+            self.connection.commit()
+        except sqlite3.DatabaseError as exc:
+            self.connection.rollback()
+            raise SearchIndexError(f"Search-index rebuild failed; transaction rolled back: {exc}") from exc
+        return self.database_summary()
 
     def initialize(self) -> None:
         self.connection.executescript(
