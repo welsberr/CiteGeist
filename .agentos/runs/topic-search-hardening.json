@@ -7,11 +7,11 @@
     "2_public_errors": "complete",
     "3_database_identity_selection": "complete",
     "4_authoritative_fts_schema": "complete",
-    "5_index_audit_rebuild": "partial",
+    "5_index_audit_rebuild": "complete",
     "6_corpus_regression": "not_started"
   },
-  "last_successful_commit": "ec8fc10",
-  "last_pushed_commit": "ec8fc10",
-  "validation": "311 passed, 5 skipped; Work Package 4 fixture checks pass",
-  "next_work_package": "5_index_audit_rebuild"
+  "last_successful_commit": "f6110cc",
+  "last_pushed_commit": "f6110cc",
+  "validation": "Work Package 5 targeted tests pass; full suite pending after AgentOS execution",
+  "next_work_package": "6_corpus_regression"
 }

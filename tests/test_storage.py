@@ -183,6 +183,25 @@ def test_store_database_summary_detects_external_content_fts_schema(tmp_path):
         store.close()
 
 
+def test_store_rebuild_search_index_refuses_incompatible_schema(tmp_path):
+    database = tmp_path / "legacy-rebuild.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE VIRTUAL TABLE entry_text_fts USING fts5(title)")
+    connection.commit()
+    connection.close()
+
+    store = BibliographyStore(database)
+    try:
+        try:
+            store.rebuild_search_index(tmp_path / "before-rebuild.sqlite3")
+        except Exception as exc:
+            assert "schema is incompatible" in str(exc)
+        else:
+            raise AssertionError("rebuild accepted an incompatible FTS schema")
+    finally:
+        store.close()
+
+
 def test_store_rebuild_search_index_creates_backup_and_removes_orphans(tmp_path):
     store = BibliographyStore(tmp_path / "library.sqlite3")
     backup_path = tmp_path / "before-rebuild.sqlite3"
