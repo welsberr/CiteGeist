@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections import deque
 from collections import OrderedDict
@@ -17,6 +18,14 @@ RELATION_FIELDS = {
     "crossref": "crossref",
 }
 EXPECTED_FTS_COLUMNS = ["citation_key", "title", "abstract", "fulltext"]
+DEFAULT_DATABASE_PATH = "library.sqlite3"
+
+
+def resolve_database_path(cli_path: str | Path | None = None) -> str:
+    """Resolve database selection: explicit argument, environment, default."""
+    if cli_path is not None and str(cli_path).strip():
+        return str(cli_path)
+    return os.environ.get("CITEGEIST_DB", DEFAULT_DATABASE_PATH).strip() or DEFAULT_DATABASE_PATH
 
 
 class SearchError(Exception):

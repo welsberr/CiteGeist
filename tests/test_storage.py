@@ -10,7 +10,7 @@ from citegeist import (
     restore_confidence_migration_backup,
 )
 from citegeist.epistemap_export import build_epistemap_graph_profile
-from citegeist.storage import SearchQueryError
+from citegeist.storage import SearchQueryError, resolve_database_path
 
 
 SAMPLE_BIB = """
@@ -95,6 +95,14 @@ def test_store_search_text_rejects_blank_query():
             raise AssertionError("blank query was accepted")
     finally:
         store.close()
+
+
+def test_resolve_database_path_precedence(monkeypatch):
+    monkeypatch.setenv("CITEGEIST_DB", "from-environment.sqlite3")
+    assert resolve_database_path() == "from-environment.sqlite3"
+    assert resolve_database_path("explicit.sqlite3") == "explicit.sqlite3"
+    monkeypatch.delenv("CITEGEIST_DB")
+    assert resolve_database_path() == "library.sqlite3"
 
 
 def test_store_database_summary_distinguishes_empty_and_healthy():

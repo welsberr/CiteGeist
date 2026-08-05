@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .app_api import LiteratureExplorerApi
-from .storage import BibliographyStore, SearchIndexError, SearchQueryError
+from .storage import BibliographyStore, SearchIndexError, SearchQueryError, resolve_database_path
 
 
 class LiteratureExplorerAppServer:
@@ -209,13 +209,13 @@ def create_request_handler(server: LiteratureExplorerAppServer):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a lightweight local HTTP bridge for the CiteGeist literature explorer demo")
-    parser.add_argument("--db", default="library.sqlite3", help="SQLite database path")
+    parser.add_argument("--db", default=None, help="SQLite database path (overrides CITEGEIST_DB)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host")
     parser.add_argument("--port", type=int, default=8765, help="Bind port")
     parser.add_argument("--api-token", default=None, help="Optional bearer token required for API access")
     args = parser.parse_args(argv)
 
-    store = BibliographyStore(Path(args.db))
+    store = BibliographyStore(Path(resolve_database_path(args.db)))
     api = LiteratureExplorerApi(store)
     api_token = args.api_token or os.environ.get("CITEGEIST_API_TOKEN")
     server = LiteratureExplorerAppServer(api, api_token=api_token)

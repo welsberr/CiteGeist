@@ -27,13 +27,13 @@ from .extract import (
 from .harvest import OaiPmhHarvester
 from .llm_verify import VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries_with_conflicts
-from .storage import BibliographyStore, SearchIndexError, SearchQueryError
+from .storage import BibliographyStore, SearchIndexError, SearchQueryError, resolve_database_path
 from .verify import BibliographyVerifier, render_verification_results
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="citegeist")
-    parser.add_argument("--db", default="library.sqlite3", help="Path to the SQLite database")
+    parser.add_argument("--db", default=None, help="Path to the SQLite database (overrides CITEGEIST_DB)")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -781,6 +781,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.db = resolve_database_path(args.db)
 
     if args.command == "confidence-restore":
         return _run_confidence_restore(Path(args.db), Path(args.backup), Path(args.report))

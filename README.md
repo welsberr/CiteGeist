@@ -137,6 +137,11 @@ citegeist/
 
 ## Quick Start
 
+Database selection is explicit: `--db PATH` takes precedence over the
+`CITEGEIST_DB` environment variable, which takes precedence over the default
+`library.sqlite3`. Use `db-status` before troubleshooting an empty or unexpected
+corpus, and use `search-index status` for FTS5-specific diagnostics.
+
 ```bash
 cd citegeist
 python3 -m virtualenv --always-copy .venv

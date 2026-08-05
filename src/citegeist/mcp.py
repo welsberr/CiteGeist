@@ -8,8 +8,7 @@ from typing import Any, Callable
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .extract import extract_references
 from .app_api import LiteratureExplorerApi
-from .storage import BibliographyStore
-from .storage import SearchIndexError, SearchQueryError
+from .storage import BibliographyStore, SearchIndexError, SearchQueryError, resolve_database_path
 
 
 SERVER_INFO = {"name": "citegeist-mcp", "version": "0.1.1"}
@@ -74,7 +73,7 @@ def _extract_references(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _search_database(arguments: dict[str, Any]) -> dict[str, Any]:
-    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    store = BibliographyStore(resolve_database_path(arguments.get("db")))
     try:
         payload = {
             "results": store.search_text(
@@ -89,7 +88,7 @@ def _search_database(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _show_entry(arguments: dict[str, Any]) -> dict[str, Any]:
-    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    store = BibliographyStore(resolve_database_path(arguments.get("db")))
     try:
         if arguments.get("citation_key"):
             payload = store.get_entry(arguments["citation_key"])
@@ -101,7 +100,7 @@ def _show_entry(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def _database_status(arguments: dict[str, Any]) -> dict[str, Any]:
-    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    store = BibliographyStore(resolve_database_path(arguments.get("db")))
     try:
         return _json_text(store.database_summary())
     finally:
@@ -114,7 +113,7 @@ def _search_topic(arguments: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("topic_slug is required")
     limit = int(arguments.get("limit", arguments.get("entry_limit", 20)))
     query = str(arguments.get("query") or "").strip()
-    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    store = BibliographyStore(resolve_database_path(arguments.get("db")))
     try:
         topic = store.get_topic(topic_slug)
         if topic is None:
@@ -136,7 +135,7 @@ def _expand_topic(arguments: dict[str, Any]) -> dict[str, Any]:
     topic_slug = arguments.get("topic_slug") or arguments.get("topic")
     if not topic_slug:
         raise ValueError("topic_slug is required")
-    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    store = BibliographyStore(resolve_database_path(arguments.get("db")))
     try:
         api = LiteratureExplorerApi(store)
         payload = api.expand_topic(
