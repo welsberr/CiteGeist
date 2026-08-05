@@ -1,3 +1,5 @@
+import sqlite3
+
 from citegeist import (
     AssessmentMethodRef,
     BibliographyStore,
@@ -126,6 +128,29 @@ def test_store_database_summary_detects_orphan_fts_rows():
         summary = store.database_summary()
         assert summary["health"] == "degraded"
         assert "fts_orphan_rows" in summary["issues"]
+    finally:
+        store.close()
+
+
+def test_store_database_summary_detects_incompatible_fts_schema(tmp_path):
+    database = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE VIRTUAL TABLE entry_text_fts USING fts5(title)")
+    connection.commit()
+    connection.close()
+
+    store = BibliographyStore(database)
+    try:
+        summary = store.database_summary()
+        assert summary["health"] == "degraded"
+        assert summary["fts_schema_compatible"] is False
+        assert "fts_schema_mismatch" in summary["issues"]
+        try:
+            store.search_text("title")
+        except Exception as exc:
+            assert "schema is incompatible" in str(exc)
+        else:
+            raise AssertionError("incompatible FTS schema was used for search")
     finally:
         store.close()
 

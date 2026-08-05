@@ -1054,7 +1054,7 @@ def _run_ingest(
 def _run_search(store: BibliographyStore, query: str, limit: int, topic_slug: str | None) -> int:
     try:
         rows = store.search_text(query, limit=limit, topic_slug=topic_slug)
-    except SearchQueryError as exc:
+    except (SearchQueryError, SearchIndexError) as exc:
         print(f"Search error: {exc}", file=sys.stderr)
         return 2
     for row in rows:

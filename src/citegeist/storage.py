@@ -16,6 +16,7 @@ RELATION_FIELDS = {
     "cited_by": "cited_by",
     "crossref": "crossref",
 }
+EXPECTED_FTS_COLUMNS = ["citation_key", "title", "abstract", "fulltext"]
 
 
 class SearchError(Exception):
@@ -74,6 +75,8 @@ class BibliographyStore:
         def count(table: str) -> int:
             return int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
+        actual_fts_columns = [row[1] for row in self.connection.execute("PRAGMA table_info(entry_text_fts)").fetchall()] if self._fts5_enabled else []
+        fts_schema_compatible = actual_fts_columns == EXPECTED_FTS_COLUMNS
         integrity = str(self.connection.execute("PRAGMA integrity_check").fetchone()[0])
         foreign_key_violations = len(self.connection.execute("PRAGMA foreign_key_check").fetchall())
         fts_row_count = count("entry_text_fts") if self._fts5_enabled else 0
@@ -86,7 +89,7 @@ class BibliographyStore:
                 WHERE e.id IS NULL
                 """
             ).fetchone()[0]
-        ) if self._fts5_enabled else 0
+        ) if self._fts5_enabled and fts_schema_compatible else 0
         fts_integrity_error = None
         if self._fts5_enabled:
             try:
@@ -101,6 +104,8 @@ class BibliographyStore:
             issues.append("foreign_key_violations")
         if fts_integrity_error:
             issues.append("fts_integrity_check_failed")
+        if self._fts5_enabled and not fts_schema_compatible:
+            issues.append("fts_schema_mismatch")
         if self._fts5_enabled and fts_row_count != count("entries"):
             issues.append("fts_entry_count_mismatch")
         if fts_orphan_count:
@@ -113,6 +118,8 @@ class BibliographyStore:
             "sqlite_integrity": integrity,
             "foreign_key_violations": foreign_key_violations,
             "fts5_enabled": self._fts5_enabled,
+            "fts_schema_compatible": fts_schema_compatible,
+            "fts_columns": actual_fts_columns,
             "entries": count("entries"),
             "topics": count("topics"),
             "entry_topics": count("entry_topics"),
@@ -669,6 +676,8 @@ class BibliographyStore:
     def search_text(self, query: str, limit: int = 10, topic_slug: str | None = None) -> list[dict[str, object]]:
         compiled_query = _compile_literal_fts_query(query)
         if self._fts5_enabled:
+            if not self._fts_schema_compatible():
+                raise SearchIndexError("The entry_text_fts schema is incompatible; run search-index status and rebuild with a backup.")
             if topic_slug:
                 rows = self.connection.execute(
                     """
@@ -721,6 +730,12 @@ class BibliographyStore:
                 ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def _fts_schema_compatible(self) -> bool:
+        if not self._fts5_enabled:
+            return False
+        columns = [row[1] for row in self.connection.execute("PRAGMA table_info(entry_text_fts)").fetchall()]
+        return columns == EXPECTED_FTS_COLUMNS
 
     def get_relations(self, citation_key: str, relation_type: str = "cites") -> list[str]:
         rows = self.connection.execute(
