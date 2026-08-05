@@ -9,6 +9,7 @@ ops/
 .codex
 SESSION_*
 topic-*
+!docs/topic-search-hardening-roadmap.md
 talkorigins-out/
 talkorigins.sqlite3
 talkorigins.sqlite3.bak-*

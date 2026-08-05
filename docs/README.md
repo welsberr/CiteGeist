@@ -17,6 +17,7 @@ This documentation therefore emphasizes:
 
 ### Planning and Status
 - **[epistemap-knowledge-graph-roadmap.md](./epistemap-knowledge-graph-roadmap.md)** - provenance-aware graph operations and cross-repository integration plan
+- **[topic-search-hardening-roadmap.md](./topic-search-hardening-roadmap.md)** - implementation-ready plan for safe FTS5 queries, database diagnostics, schema lifecycle, and index recovery
 - **[source-landscape.md](./source-landscape.md)** - recommended next open bibliographic sources
 - **[implementation-progress.md](./implementation-progress.md)** - sources-first progress tracker
 - **[phase-completion.md](./phase-completion.md)** - short status summary
