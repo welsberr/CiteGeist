@@ -102,6 +102,48 @@ def test_mcp_searches_topic(tmp_path) -> None:
     assert payload["results"][0]["citation_key"] == "seed2024"
 
 
+def test_mcp_searches_topic_with_hyphenated_query(tmp_path) -> None:
+    database = tmp_path / "library.sqlite3"
+    store = BibliographyStore(database)
+    try:
+        store.upsert_entry(
+            BibEntry(
+                entry_type="article",
+                citation_key="natural2024",
+                fields={"title": "Natural Selection", "year": "2024"},
+            ),
+            source_type="test",
+            source_label="fixture",
+        )
+        store.add_entry_topic(
+            "natural2024",
+            topic_slug="natural-selection",
+            topic_name="Natural Selection",
+            source_label="topic-seed",
+        )
+        store.connection.commit()
+    finally:
+        store.close()
+
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "search_topic",
+                "arguments": {
+                    "db": str(database),
+                    "topic_slug": "natural-selection",
+                    "query": "natural-selection",
+                },
+            },
+        }
+    )
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["results"][0]["citation_key"] == "natural2024"
+
+
 def test_mcp_expands_topic_with_preview_default(tmp_path) -> None:
     database = tmp_path / "library.sqlite3"
     store = BibliographyStore(database)

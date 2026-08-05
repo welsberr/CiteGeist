@@ -30,7 +30,7 @@ from .sources import EuropePmcSource
 from .sources import OpenLibrarySource
 from .sources import SemanticScholarSource
 from .sources import UnpaywallSource
-from .storage import BibliographyStore
+from .storage import BibliographyStore, SearchError, SearchQueryError
 from .verify import BibliographyVerifier, VerificationResult, VerificationMatch
 
 __all__ = [
@@ -40,6 +40,8 @@ __all__ = [
     "BatchJobResult",
     "AssessmentMethodRef",
     "BibliographyStore",
+    "SearchError",
+    "SearchQueryError",
     "BibliographyVerifier",
     "BootstrapResult",
     "Bootstrapper",

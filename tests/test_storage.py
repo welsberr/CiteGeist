@@ -8,6 +8,7 @@ from citegeist import (
     restore_confidence_migration_backup,
 )
 from citegeist.epistemap_export import build_epistemap_graph_profile
+from citegeist.storage import SearchQueryError
 
 
 SAMPLE_BIB = """
@@ -58,6 +59,38 @@ def test_store_ingests_entries_relations_and_search_text():
             "miller2023search",
             "smith2024graphs",
         ]
+    finally:
+        store.close()
+
+
+def test_store_search_text_treats_punctuation_as_literal_text():
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(
+            """
+@article{natural2024,
+  title = {Natural Selection and Human Evolution},
+  year = {2024},
+  abstract = {A study of c++ and title: evolution.}
+}
+"""
+        )
+        for query in ("natural-selection", "human-evolution", "c++", "title: evolution", '"quoted phrase"', "O'Brien", "alpha/beta", "()"):
+            store.search_text(query)
+        assert store.search_text("natural-selection")[0]["citation_key"] == "natural2024"
+    finally:
+        store.close()
+
+
+def test_store_search_text_rejects_blank_query():
+    store = BibliographyStore()
+    try:
+        try:
+            store.search_text("   ")
+        except SearchQueryError as exc:
+            assert "at least one" in str(exc)
+        else:
+            raise AssertionError("blank query was accepted")
     finally:
         store.close()
 

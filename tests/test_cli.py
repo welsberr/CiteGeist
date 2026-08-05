@@ -2006,6 +2006,24 @@ def test_cli_search_can_filter_by_topic(tmp_path: Path):
     assert "other2023" not in search.stdout
 
 
+def test_cli_search_handles_hyphenated_query_without_traceback(tmp_path: Path):
+    bib_path = tmp_path / "input.bib"
+    bib_path.write_text(
+        "@article{natural2024, title={Natural Selection}, year={2024}}\n",
+        encoding="utf-8",
+    )
+    assert run_cli(tmp_path, "ingest", str(bib_path)).returncode == 0
+
+    search = run_cli(tmp_path, "search", "natural-selection")
+    assert search.returncode == 0
+    assert "natural2024" in search.stdout
+
+    blank = run_cli(tmp_path, "search", "   ")
+    assert blank.returncode == 2
+    assert "Search error:" in blank.stderr
+    assert "Traceback" not in blank.stderr
+
+
 def test_cli_graph_outputs_missing_targets(tmp_path: Path):
     bib_path = tmp_path / "graph.bib"
     bib_path.write_text(

@@ -27,7 +27,7 @@ from .extract import (
 from .harvest import OaiPmhHarvester
 from .llm_verify import VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries_with_conflicts
-from .storage import BibliographyStore
+from .storage import BibliographyStore, SearchQueryError
 from .verify import BibliographyVerifier, render_verification_results
 
 
@@ -1035,7 +1035,12 @@ def _run_ingest(
 
 
 def _run_search(store: BibliographyStore, query: str, limit: int, topic_slug: str | None) -> int:
-    for row in store.search_text(query, limit=limit, topic_slug=topic_slug):
+    try:
+        rows = store.search_text(query, limit=limit, topic_slug=topic_slug)
+    except SearchQueryError as exc:
+        print(f"Search error: {exc}", file=sys.stderr)
+        return 2
+    for row in rows:
         score = row.get("score", 0.0)
         print(f"{row['citation_key']}\t{row.get('year') or ''}\t{score:.3f}\t{row.get('title') or ''}")
     return 0

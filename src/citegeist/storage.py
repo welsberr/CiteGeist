@@ -16,6 +16,29 @@ RELATION_FIELDS = {
     "cited_by": "cited_by",
     "crossref": "crossref",
 }
+
+
+class SearchError(Exception):
+    """Base class for expected search failures exposed by public adapters."""
+
+
+class SearchQueryError(SearchError, ValueError):
+    """The supplied natural-language query cannot be searched."""
+
+
+def _compile_literal_fts_query(query: str) -> str:
+    """Compile ordinary user text into a literal FTS5 phrase.
+
+    CiteGeist's ordinary search interface accepts natural-language text, not
+    FTS5 expressions. Quoting the complete input prevents punctuation such as
+    hyphens, plus signs, colons, and parentheses from becoming FTS operators or
+    column selectors. SQLite's FTS tokenizer still determines token matching
+    inside the phrase.
+    """
+    text = str(query or "").strip()
+    if not text:
+        raise SearchQueryError("Search query must contain at least one non-whitespace character.")
+    return '"' + text.replace('"', '""') + '"'
 CORE_ENTRY_FIELDS = {
     "title",
     "year",
@@ -551,6 +574,7 @@ class BibliographyStore:
         return entry_id
 
     def search_text(self, query: str, limit: int = 10, topic_slug: str | None = None) -> list[dict[str, object]]:
+        compiled_query = _compile_literal_fts_query(query)
         if self._fts5_enabled:
             if topic_slug:
                 rows = self.connection.execute(
@@ -564,7 +588,7 @@ class BibliographyStore:
                     ORDER BY score
                     LIMIT ?
                     """,
-                    (query, topic_slug, limit),
+                    (compiled_query, topic_slug, limit),
                 ).fetchall()
             else:
                 rows = self.connection.execute(
@@ -576,7 +600,7 @@ class BibliographyStore:
                     ORDER BY score
                     LIMIT ?
                     """,
-                    (query, limit),
+                    (compiled_query, limit),
                 ).fetchall()
         else:
             pattern = f"%{query}%"
