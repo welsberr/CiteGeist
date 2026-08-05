@@ -107,25 +107,12 @@ CREATE TABLE IF NOT EXISTS relation_provenance (
 );
 
 -- Full-text Search (FTS5)
-CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+-- This standalone index is maintained by BibliographyStore.upsert_entry.
+-- Do not substitute an external-content entries_fts table without updating the
+-- runtime storage code and index lifecycle together.
+CREATE VIRTUAL TABLE IF NOT EXISTS entry_text_fts USING fts5(
+    citation_key UNINDEXED,
     title,
     abstract,
-    keywords,
-    content='entries',
-    content_rowid='id'
+    fulltext
 );
-
--- Trigger to sync entries with FTS
-CREATE TRIGGER IF NOT EXISTS entries_ai AFTER INSERT ON entries BEGIN
-    INSERT INTO entries_fts(rowid, title, abstract, keywords)
-    VALUES (new.id, new.title, new.abstract, new.keywords);
-END;
-
-CREATE TRIGGER IF NOT EXISTS entries_ad AFTER DELETE ON entries BEGIN
-    DELETE FROM entries_fts WHERE rowid = old.id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
-    UPDATE entries_fts SET title = new.title, abstract = new.abstract, keywords = new.keywords
-    WHERE rowid = new.id;
-END;
