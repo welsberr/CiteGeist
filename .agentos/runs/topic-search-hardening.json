@@ -8,10 +8,10 @@
     "3_database_identity_selection": "complete",
     "4_authoritative_fts_schema": "complete",
     "5_index_audit_rebuild": "complete",
-    "6_corpus_regression": "not_started"
+    "6_corpus_regression": "complete"
   },
-  "last_successful_commit": "f6110cc",
-  "last_pushed_commit": "f6110cc",
-  "validation": "Work Package 5 targeted tests pass; full suite pending after AgentOS execution",
-  "next_work_package": "6_corpus_regression"
+  "last_successful_commit": "368a789",
+  "last_pushed_commit": "368a789",
+  "validation": "Focused changed-surface suite: 101 passed, 3 warnings; full suite reaches the output cap with no reported failures",
+  "next_work_package": null
 }
