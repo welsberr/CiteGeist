@@ -9,6 +9,7 @@ from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .extract import extract_references
 from .app_api import LiteratureExplorerApi
 from .storage import BibliographyStore
+from .storage import SearchIndexError, SearchQueryError
 
 
 SERVER_INFO = {"name": "citegeist-mcp", "version": "0.1.1"}
@@ -311,10 +312,16 @@ def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
             raise ValueError(f"Unsupported method: {method}")
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
     except Exception as exc:
+        if isinstance(exc, SearchQueryError):
+            error_code = "search_query_error"
+        elif isinstance(exc, SearchIndexError):
+            error_code = "search_index_error"
+        else:
+            error_code = "request_error"
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "error": {"code": -32000, "message": str(exc)},
+            "error": {"code": -32000, "message": str(exc), "data": {"code": error_code}},
         }
 
 

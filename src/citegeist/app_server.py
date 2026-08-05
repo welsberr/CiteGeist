@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .app_api import LiteratureExplorerApi
-from .storage import BibliographyStore
+from .storage import BibliographyStore, SearchIndexError, SearchQueryError
 
 
 class LiteratureExplorerAppServer:
@@ -144,10 +144,26 @@ def create_request_handler(server: LiteratureExplorerAppServer):
                     raise ValueError("params must be an object")
                 result = server.dispatch(method, params)
                 self._write_json({"ok": True, "result": result})
-            except KeyError as exc:
-                self._write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.NOT_FOUND)
-            except Exception as exc:  # pragma: no cover - defensive fallback
-                self._write_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except SearchQueryError as exc:
+                self._write_json(
+                    {"ok": False, "error": {"code": "search_query_error", "message": str(exc)}},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+            except SearchIndexError as exc:
+                self._write_json(
+                    {"ok": False, "error": {"code": "search_index_error", "message": str(exc)}},
+                    status=HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+            except KeyError:
+                self._write_json(
+                    {"ok": False, "error": {"code": "not_found", "message": "Requested method or resource was not found."}},
+                    status=HTTPStatus.NOT_FOUND,
+                )
+            except Exception:  # pragma: no cover - defensive fallback
+                self._write_json(
+                    {"ok": False, "error": {"code": "request_error", "message": "Request could not be completed."}},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
 
         def do_GET(self) -> None:
             if self.path == "/healthz":

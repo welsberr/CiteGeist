@@ -158,6 +158,18 @@ def test_mcp_searches_topic_with_hyphenated_query(tmp_path) -> None:
     assert payload["results"][0]["citation_key"] == "natural2024"
 
 
+def test_mcp_reports_search_query_error_code():
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {"name": "search_database", "arguments": {"db": ":memory:", "query": "   "}},
+        }
+    )
+    assert response["error"]["data"]["code"] == "search_query_error"
+
+
 def test_mcp_expands_topic_with_preview_default(tmp_path) -> None:
     database = tmp_path / "library.sqlite3"
     store = BibliographyStore(database)
