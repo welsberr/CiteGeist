@@ -18,6 +18,7 @@ RELATION_FIELDS = {
     "crossref": "crossref",
 }
 EXPECTED_FTS_COLUMNS = ["citation_key", "title", "abstract", "fulltext"]
+FTS_SCHEMA_VERSION = "entry_text_fts_v1"
 DEFAULT_DATABASE_PATH = "library.sqlite3"
 
 
@@ -85,7 +86,12 @@ class BibliographyStore:
             return int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
         actual_fts_columns = [row[1] for row in self.connection.execute("PRAGMA table_info(entry_text_fts)").fetchall()] if self._fts5_enabled else []
+        fts_sql = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entry_text_fts'"
+        ).fetchone()
+        fts_sql = str(fts_sql[0] or "") if fts_sql else ""
         fts_schema_compatible = actual_fts_columns == EXPECTED_FTS_COLUMNS
+        fts_schema_compatible = fts_schema_compatible and "using fts5" in fts_sql.lower() and "content=" not in fts_sql.lower()
         integrity = str(self.connection.execute("PRAGMA integrity_check").fetchone()[0])
         foreign_key_violations = len(self.connection.execute("PRAGMA foreign_key_check").fetchall())
         fts_row_count = count("entry_text_fts") if self._fts5_enabled else 0
@@ -120,6 +126,7 @@ class BibliographyStore:
         if fts_orphan_count:
             issues.append("fts_orphan_rows")
         health = "degraded" if issues else ("empty" if count("entries") == 0 else "healthy")
+        metadata = dict(self.connection.execute("SELECT key, value FROM citegeist_metadata").fetchall())
         return {
             "path": self.path,
             "health": health,
@@ -129,6 +136,8 @@ class BibliographyStore:
             "fts5_enabled": self._fts5_enabled,
             "fts_schema_compatible": fts_schema_compatible,
             "fts_columns": actual_fts_columns,
+            "fts_schema_version": metadata.get("fts_schema_version"),
+            "schema_version": metadata.get("schema_version"),
             "entries": count("entries"),
             "topics": count("topics"),
             "entry_topics": count("entry_topics"),
@@ -146,6 +155,8 @@ class BibliographyStore:
             raise SearchIndexError("SQLite integrity check failed; refusing to rebuild the search index.")
         if summary["foreign_key_violations"]:
             raise SearchIndexError("Foreign-key violations exist; refusing to rebuild the search index.")
+        if not summary["fts_schema_compatible"]:
+            raise SearchIndexError("The entry_text_fts schema is incompatible; refusing to rebuild it.")
         destination = Path(backup_path)
         if destination.exists():
             raise SearchIndexError(f"Backup path already exists: {destination}")
@@ -197,6 +208,11 @@ class BibliographyStore:
                 extra_fields_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS citegeist_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS creators (
@@ -349,6 +365,13 @@ class BibliographyStore:
                 )
                 """
             )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO citegeist_metadata(key, value) VALUES ('schema_version', '1')"
+        )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO citegeist_metadata(key, value) VALUES ('fts_schema_version', ?)"
+            , (FTS_SCHEMA_VERSION,)
+        )
         self.connection.commit()
 
     def upsert_confidence_assessment(self, assessment: ConfidenceAssessment, *, commit: bool = True) -> None:
@@ -744,7 +767,11 @@ class BibliographyStore:
         if not self._fts5_enabled:
             return False
         columns = [row[1] for row in self.connection.execute("PRAGMA table_info(entry_text_fts)").fetchall()]
-        return columns == EXPECTED_FTS_COLUMNS
+        sql_row = self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entry_text_fts'"
+        ).fetchone()
+        sql = str(sql_row[0] or "") if sql_row else ""
+        return columns == EXPECTED_FTS_COLUMNS and "using fts5" in sql.lower() and "content=" not in sql.lower()
 
     def get_relations(self, citation_key: str, relation_type: str = "cites") -> list[str]:
         rows = self.connection.execute(

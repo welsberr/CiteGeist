@@ -1,5 +1,11 @@
 -- CiteGeist Current Schema (SQLite)
 
+-- Schema metadata
+CREATE TABLE IF NOT EXISTS citegeist_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 -- Entries table
 CREATE TABLE IF NOT EXISTS entries (
     id INTEGER PRIMARY KEY,

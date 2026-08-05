@@ -163,6 +163,26 @@ def test_store_database_summary_detects_incompatible_fts_schema(tmp_path):
         store.close()
 
 
+def test_store_database_summary_detects_external_content_fts_schema(tmp_path):
+    database = tmp_path / "external-content.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE entries (id INTEGER PRIMARY KEY, citation_key TEXT, title TEXT, abstract TEXT, fulltext TEXT)")
+    connection.execute(
+        "CREATE VIRTUAL TABLE entry_text_fts USING fts5(citation_key UNINDEXED, title, abstract, fulltext, content='entries', content_rowid='id')"
+    )
+    connection.commit()
+    connection.close()
+
+    store = BibliographyStore(database)
+    try:
+        summary = store.database_summary()
+        assert summary["health"] == "degraded"
+        assert summary["fts_schema_compatible"] is False
+        assert "fts_schema_mismatch" in summary["issues"]
+    finally:
+        store.close()
+
+
 def test_store_rebuild_search_index_creates_backup_and_removes_orphans(tmp_path):
     store = BibliographyStore(tmp_path / "library.sqlite3")
     backup_path = tmp_path / "before-rebuild.sqlite3"
