@@ -95,6 +95,41 @@ def test_store_search_text_rejects_blank_query():
         store.close()
 
 
+def test_store_database_summary_distinguishes_empty_and_healthy():
+    store = BibliographyStore()
+    try:
+        summary = store.database_summary()
+        assert summary["health"] == "empty"
+        assert summary["entries"] == 0
+        assert summary["fts_rows"] == 0
+    finally:
+        store.close()
+
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex("@article{one2024, title={One}, year={2024}}")
+        summary = store.database_summary()
+        assert summary["health"] == "healthy"
+        assert summary["entries"] == summary["fts_rows"] == 1
+        assert summary["issues"] == []
+    finally:
+        store.close()
+
+
+def test_store_database_summary_detects_orphan_fts_rows():
+    store = BibliographyStore()
+    try:
+        store.connection.execute(
+            "INSERT INTO entry_text_fts(citation_key, title, abstract, fulltext) VALUES (?, ?, ?, ?)",
+            ("missing", "Missing", "", ""),
+        )
+        summary = store.database_summary()
+        assert summary["health"] == "degraded"
+        assert "fts_orphan_rows" in summary["issues"]
+    finally:
+        store.close()
+
+
 def test_store_persists_typed_confidence_assessments_and_preserves_zero():
     store = BibliographyStore()
     try:

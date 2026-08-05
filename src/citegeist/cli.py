@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--limit", type=int, default=10, help="Maximum number of results")
     search_parser.add_argument("--topic", help="Optional topic slug to filter search results")
 
+    subparsers.add_parser(
+        "db-status",
+        help="Report database contents and read-only SQLite/FTS5 health checks",
+    )
+
     show_parser = subparsers.add_parser("show", help="Show one entry or list entries")
     show_parser.add_argument("citation_key", nargs="?", help="Citation key to show")
     show_parser.add_argument("--limit", type=int, default=20, help="Maximum entries when listing")
@@ -780,6 +785,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_ingest(store, Path(args.input), args.status, args.source_label)
         if args.command == "search":
             return _run_search(store, args.query, args.limit, args.topic)
+        if args.command == "db-status":
+            return _run_db_status(store)
         if args.command == "show":
             return _run_show(store, args.citation_key, args.limit, args.provenance, args.conflicts)
         if args.command == "export":
@@ -1044,6 +1051,12 @@ def _run_search(store: BibliographyStore, query: str, limit: int, topic_slug: st
         score = row.get("score", 0.0)
         print(f"{row['citation_key']}\t{row.get('year') or ''}\t{score:.3f}\t{row.get('title') or ''}")
     return 0
+
+
+def _run_db_status(store: BibliographyStore) -> int:
+    summary = store.database_summary()
+    print(json.dumps(summary, indent=2))
+    return 1 if summary["health"] == "degraded" else 0
 
 
 def _run_show(

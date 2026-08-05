@@ -65,6 +65,58 @@ class BibliographyStore:
     def close(self) -> None:
         self.connection.close()
 
+    def database_summary(self) -> dict[str, object]:
+        """Return read-only corpus and search-index health information."""
+        def count(table: str) -> int:
+            return int(self.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+        integrity = str(self.connection.execute("PRAGMA integrity_check").fetchone()[0])
+        foreign_key_violations = len(self.connection.execute("PRAGMA foreign_key_check").fetchall())
+        fts_row_count = count("entry_text_fts") if self._fts5_enabled else 0
+        fts_orphan_count = int(
+            self.connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM entry_text_fts f
+                LEFT JOIN entries e ON e.citation_key = f.citation_key
+                WHERE e.id IS NULL
+                """
+            ).fetchone()[0]
+        ) if self._fts5_enabled else 0
+        fts_integrity_error = None
+        if self._fts5_enabled:
+            try:
+                self.connection.execute("INSERT INTO entry_text_fts(entry_text_fts) VALUES('integrity-check')")
+            except sqlite3.DatabaseError as exc:
+                fts_integrity_error = str(exc)
+
+        issues = []
+        if integrity != "ok":
+            issues.append("sqlite_integrity_check_failed")
+        if foreign_key_violations:
+            issues.append("foreign_key_violations")
+        if fts_integrity_error:
+            issues.append("fts_integrity_check_failed")
+        if self._fts5_enabled and fts_row_count != count("entries"):
+            issues.append("fts_entry_count_mismatch")
+        if fts_orphan_count:
+            issues.append("fts_orphan_rows")
+        health = "degraded" if issues else ("empty" if count("entries") == 0 else "healthy")
+        return {
+            "path": self.path,
+            "health": health,
+            "issues": issues,
+            "sqlite_integrity": integrity,
+            "foreign_key_violations": foreign_key_violations,
+            "fts5_enabled": self._fts5_enabled,
+            "entries": count("entries"),
+            "topics": count("topics"),
+            "entry_topics": count("entry_topics"),
+            "fts_rows": fts_row_count,
+            "fts_orphan_rows": fts_orphan_count,
+            "fts_integrity_error": fts_integrity_error,
+        }
+
     def initialize(self) -> None:
         self.connection.executescript(
             """
