@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 from citegeist import (
     AssessmentMethodRef,
@@ -80,6 +81,17 @@ def test_store_search_text_treats_punctuation_as_literal_text():
         for query in ("natural-selection", "human-evolution", "c++", "title: evolution", '"quoted phrase"', "O'Brien", "alpha/beta", "()"):
             store.search_text(query)
         assert store.search_text("natural-selection")[0]["citation_key"] == "natural2024"
+    finally:
+        store.close()
+
+
+def test_store_search_text_fixture_covers_topic_search_terms():
+    fixture = Path(__file__).parent / "fixtures" / "topic-search.bib"
+    store = BibliographyStore()
+    try:
+        store.ingest_bibtex(fixture.read_text(encoding="utf-8"))
+        assert store.search_text("natural-selection")[0]["citation_key"] == "natural2024fixture"
+        assert store.search_text("c++")[0]["citation_key"] == "punctuation2023fixture"
     finally:
         store.close()
 
