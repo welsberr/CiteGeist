@@ -99,6 +99,14 @@ def _show_entry(arguments: dict[str, Any]) -> dict[str, Any]:
     return _json_text(payload)
 
 
+def _database_status(arguments: dict[str, Any]) -> dict[str, Any]:
+    store = BibliographyStore(arguments.get("db", "library.sqlite3"))
+    try:
+        return _json_text(store.database_summary())
+    finally:
+        store.close()
+
+
 def _search_topic(arguments: dict[str, Any]) -> dict[str, Any]:
     topic_slug = arguments.get("topic_slug") or arguments.get("topic")
     if not topic_slug:
@@ -219,6 +227,14 @@ TOOLS: dict[str, dict[str, Any]] = {
             },
         },
         "handler": _show_entry,
+    },
+    "database_status": {
+        "description": "Report read-only CiteGeist database and FTS5 health information.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"db": {"type": "string"}},
+        },
+        "handler": _database_status,
     },
     "search_topic": {
         "description": "Search or list entries assigned to one CiteGeist topic.",

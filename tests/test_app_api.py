@@ -140,6 +140,16 @@ def test_literature_explorer_api_search_and_show_entry():
         store.close()
 
 
+def test_literature_explorer_api_database_status():
+    store = BibliographyStore()
+    try:
+        payload = LiteratureExplorerApi(store).database_status()
+        assert payload["health"] == "empty"
+        assert payload["fts5_enabled"] is True
+    finally:
+        store.close()
+
+
 def test_literature_explorer_api_capabilities_distinguish_metadata_and_expansion_sources():
     store = BibliographyStore()
     try:

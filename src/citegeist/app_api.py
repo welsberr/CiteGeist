@@ -35,6 +35,7 @@ class LiteratureExplorerApi:
         return {
             "operations": [
                 "search",
+                "database_status",
                 "show_entry",
                 "list_topics",
                 "get_topic",
@@ -60,6 +61,9 @@ class LiteratureExplorerApi:
             "topic_slug": topic_slug,
             "results": self.store.search_text(query, limit=limit, topic_slug=topic_slug),
         }
+
+    def database_status(self) -> dict[str, object]:
+        return self.store.database_summary()
 
     def show_entry(
         self,

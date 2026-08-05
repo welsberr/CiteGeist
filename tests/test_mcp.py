@@ -17,6 +17,7 @@ def test_mcp_lists_tools() -> None:
         "extract_references",
         "search_database",
         "show_entry",
+        "database_status",
         "search_topic",
         "expand_topic",
     } <= names
@@ -55,6 +56,19 @@ def test_mcp_reports_unknown_tool() -> None:
     )
     assert response["error"]["code"] == -32000
     assert "Unknown tool" in response["error"]["message"]
+
+
+def test_mcp_reports_database_status(tmp_path) -> None:
+    response = handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "database_status", "arguments": {"db": str(tmp_path / "library.sqlite3")}},
+        }
+    )
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload["health"] == "empty"
 
 
 def test_mcp_searches_topic(tmp_path) -> None:

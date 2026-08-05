@@ -27,6 +27,8 @@ class LiteratureExplorerAppServer:
                 limit=int(params.get("limit", 20)),
                 topic_slug=_optional_str(params.get("topic_slug")),
             )
+        if method == "database_status":
+            return self.api.database_status()
         if method == "show_entry":
             return self.api.show_entry(
                 str(params.get("citation_key") or ""),

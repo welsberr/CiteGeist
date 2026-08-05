@@ -84,6 +84,15 @@ def test_literature_explorer_app_server_dispatch_search():
         store.close()
 
 
+def test_literature_explorer_app_server_dispatch_database_status():
+    store = BibliographyStore()
+    try:
+        payload = LiteratureExplorerAppServer(LiteratureExplorerApi(store)).dispatch("database_status")
+        assert payload["health"] == "empty"
+    finally:
+        store.close()
+
+
 def test_literature_explorer_app_server_dispatch_exports_topic_bibtex():
     store = BibliographyStore()
     try:
