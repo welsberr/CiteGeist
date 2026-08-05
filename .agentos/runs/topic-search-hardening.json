@@ -1,0 +1,17 @@
+{
+  "run_id": "topic-search-hardening-2026-08-05",
+  "role": "topic-search-hardener",
+  "status": "active",
+  "work_packages": {
+    "1_safe_query_compilation": "complete",
+    "2_public_errors": "complete",
+    "3_database_identity_selection": "complete",
+    "4_authoritative_fts_schema": "complete",
+    "5_index_audit_rebuild": "partial",
+    "6_corpus_regression": "not_started"
+  },
+  "last_successful_commit": "ec8fc10",
+  "last_pushed_commit": "ec8fc10",
+  "validation": "311 passed, 5 skipped; Work Package 4 fixture checks pass",
+  "next_work_package": "5_index_audit_rebuild"
+}

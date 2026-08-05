@@ -1,0 +1,21 @@
+{
+  "agentos_version": "0.1",
+  "scope": "project",
+  "owner": "welsberr",
+  "last_reviewed": "2026-08-05",
+  "sources_of_truth": [
+    "docs/topic-search-hardening-roadmap.md",
+    "git history",
+    "pytest results"
+  ],
+  "roles": ["topic-search-hardener"],
+  "memory": [".agentos/runs/topic-search-hardening.json"],
+  "connections": ["GitHub origin/main"],
+  "verification_checks": ["pytest", "git diff --check", "database status smoke checks"],
+  "automations": ["incremental commit and push after successful work package"],
+  "public_private_policy": {
+    "public_allowed": ["source code", "tests", "roadmaps", "sanitized run summaries"],
+    "private_required": ["credentials", "production database contents", "local model logs"],
+    "publish_requires_review": true
+  }
+}

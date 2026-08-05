@@ -10,6 +10,8 @@ ops/
 SESSION_*
 topic-*
 !docs/topic-search-hardening-roadmap.md
+!.agentos/roles/topic-*
+!.agentos/runs/topic-*
 talkorigins-out/
 talkorigins.sqlite3
 talkorigins.sqlite3.bak-*
