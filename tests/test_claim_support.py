@@ -1,5 +1,5 @@
 from citegeist.bibtex import BibEntry
-from citegeist.claim_support import analyze_support_gaps
+from citegeist.claim_support import analyze_support_gaps, bounded_claim_evidence_check
 from citegeist.verify import VerificationMatch, VerificationResult
 
 
@@ -44,6 +44,24 @@ class FakeVerifier:
             input_type="string",
             input_key=None,
         )
+
+
+def test_bounded_claim_evidence_check_separates_candidate_support_from_promotion():
+    payload = bounded_claim_evidence_check(
+        "Movement strategies improve resource exploitation.",
+        verifier=FakeVerifier(),
+        max_results=2,
+        allowed_source_routes=["local_catalog"],
+    )
+
+    assert payload["schema_version"] == "citegeist.bounded_evidence_check.v1"
+    assert payload["status"] == "unresolved"
+    assert payload["max_results"] == 2
+    assert payload["source_routes"] == ["local_catalog"]
+    assert payload["source_routes_enforced"] is False
+    assert payload["candidates"][0]["source_identity"] == "resolved"
+    assert payload["candidates"][0]["claim_support"] == "candidate_support"
+    assert payload["candidates"][0]["promotion"] == "never_automatic"
 
 
 def test_analyze_support_gaps_filters_existing_reference_titles():

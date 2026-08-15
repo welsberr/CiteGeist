@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .bibtex import BibEntry, parse_bibtex, render_bibtex
 from .extract import extract_references
+from .claim_support import bounded_claim_evidence_check
 from .app_api import LiteratureExplorerApi
 from .storage import BibliographyStore, SearchIndexError, SearchQueryError, resolve_database_path
 
@@ -107,6 +108,17 @@ def _database_status(arguments: dict[str, Any]) -> dict[str, Any]:
         store.close()
 
 
+def _bounded_claim_evidence_check(arguments: dict[str, Any]) -> dict[str, Any]:
+    return _json_text(
+        bounded_claim_evidence_check(
+            str(arguments.get("claim", "")),
+            context=str(arguments.get("context", "")),
+            max_results=int(arguments.get("max_results", 3)),
+            allowed_source_routes=list(arguments.get("allowed_source_routes") or []),
+        )
+    )
+
+
 def _search_topic(arguments: dict[str, Any]) -> dict[str, Any]:
     topic_slug = arguments.get("topic_slug") or arguments.get("topic")
     if not topic_slug:
@@ -160,6 +172,20 @@ def _expand_topic(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 TOOLS: dict[str, dict[str, Any]] = {
+    "bounded_claim_evidence_check": {
+        "description": "Run one bounded bibliographic evidence check; candidates never become accepted citations automatically.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["claim"],
+            "properties": {
+                "claim": {"type": "string", "minLength": 1},
+                "context": {"type": "string"},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
+                "allowed_source_routes": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "handler": _bounded_claim_evidence_check,
+    },
     "parse_bibtex": {
         "description": "Parse BibTeX text or a BibTeX file into structured entries.",
         "inputSchema": {
