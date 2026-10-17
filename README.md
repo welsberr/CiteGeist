@@ -453,3 +453,80 @@ The name is intended to be short, distinct, and memorable:
 
 - `cite` for citation work;
 - `geist` for the organizing intelligence around the literature.
+
+## Verification, network diagnostics, and licensing
+
+CiteGeist is distributed under the [MIT license](LICENSE). Dependencies and retrieved
+metadata or documents retain their own licenses and terms.
+
+`verify` accepts bare DOIs, DOI URLs, and DOIs embedded in citation text. BibTeX
+verification and resolution also inspect `url`, `note`, and `howpublished`. arXiv
+identifiers work as bare IDs, `arXiv:` references, abstract/PDF URLs, an `arxiv`
+field, or `eprint` with `archiveprefix = {arXiv}`. Exact means an identifier resolved;
+it does not mean the paper's claims have been validated.
+
+```sh
+citegeist verify --doi '10.1038/nature12373' --format json
+citegeist verify --arxiv '1706.03762' --format json
+citegeist verify --string 'a reference to investigate' --trace
+```
+
+Shared metadata HTTP requests now have a 15-second socket timeout, configurable
+with `CITEGEIST_HTTP_TIMEOUT`. This is a per-request timeout, not a total operation
+deadline: retries, PubMed follow-up requests, and optional LLM calls can extend the
+operation. Four independent verification searches run concurrently; their output
+order remains deterministic. `--trace` writes host, attempt number and elapsed
+request time to stderr without logging query strings or API keys. Identifier
+lookups avoid broad searches when successful.
+
+For TLS inspection, configure `CITEGEIST_CA_BUNDLE=/path/to/trusted-bundle.pem`.
+`REQUESTS_CA_BUNDLE` is also accepted by the shared metadata client; Python's
+standard `SSL_CERT_FILE` and `SSL_CERT_DIR` work when no explicit bundle is supplied.
+Use a bundle containing the necessary public and organizational trust roots.
+Certificate verification remains enabled. Certificate validation failures now
+raise an actionable error immediately instead of being retried and interpreted
+as missing metadata. This configuration applies to the shared metadata client;
+legacy plugins with their own HTTP transports may require `SSL_CERT_FILE`.
+Crossref expansion no longer sends a developer's personal email address.
+
+## Government, NGO, thesis, economics, and finance sources
+
+Run `citegeist sources` to see capabilities, access conditions, documentation links,
+and integration status. `citegeist discover` returns unverified BibTeX for World Bank
+reports or FRED series for review and explicit ingestion; `citegeist research`
+returns read-only JSON candidates from local search and explicitly selected scholarly
+adapters. Neither command adds records to the database or verifies claim support.
+
+```sh
+citegeist discover worldbank 'inflation monetary policy' --limit 10 > reports.bib
+# Set your own FRED_API_KEY before searching series:
+citegeist discover fred 'unemployment' --limit 10 > series.bib
+citegeist ingest reports.bib --status draft --source-label worldbank
+```
+
+The [World Bank Documents & Reports API](https://documents.worldbank.org/en/publication/documents-reports/api)
+supports report discovery. [FRED](https://fred.stlouisfed.org/docs/api/fred/)
+supports series discovery and [requires each user to supply their own key](https://fred.stlouisfed.org/docs/api/api_key.html).
+Series metadata is distinct from a paper: retain the original data producer,
+units, frequency, retrieval date and vintage when citing observations. Initial
+queries worth exploring include inflation and CPI, unemployment and labor-force
+participation, wages and productivity, interest rates and credit, GDP and national
+accounts, inequality, trade and exchange rates. These are query examples, not
+claims of comprehensive topic coverage.
+
+Additional researched sources are visible in the catalog but do not yet have
+dedicated discovery adapters:
+
+| Source | Material and integration considerations |
+| --- | --- |
+| [BLS](https://www.bls.gov/developers/) | Authoritative labor and price series; its API requires series identifiers rather than literature keyword queries. |
+| [OSTI](https://www.osti.gov/api/v1/docs) | Government research reports and [theses/dissertations](https://www.osti.gov/faqs); API and OAI-PMH access. |
+| [ReliefWeb](https://apidoc.reliefweb.int/) | NGO and government humanitarian reports; preserve original source organizations, rights and application access requirements. |
+| [BASE](https://oai.base-search.net/) | Institutional repositories, including master's and doctoral theses; check access conditions and metadata formats. |
+| [RePEc](https://ideas.repec.org/getdata.html) | Economics working papers and journal metadata; distributed provider metadata needs ReDIF/AMF normalization and reuse review. |
+
+The existing `discover-oai` and `harvest-oai` commands can inspect and harvest
+compatible institutional repositories. Check supported metadata formats and set
+names before harvesting; repository inclusion does not guarantee thesis coverage,
+full-text access, or permission to redistribute documents. Dedicated adapters,
+subject-specific query expansion, and measured coverage remain follow-up work.

@@ -46,7 +46,7 @@ class FakeVerifier:
         )
 
 
-def test_bounded_claim_evidence_check_separates_candidate_support_from_promotion():
+def test_bounded_claim_evidence_check_keeps_support_unassessed_without_passages():
     payload = bounded_claim_evidence_check(
         "Movement strategies improve resource exploitation.",
         verifier=FakeVerifier(),
@@ -60,7 +60,7 @@ def test_bounded_claim_evidence_check_separates_candidate_support_from_promotion
     assert payload["source_routes"] == ["local_catalog"]
     assert payload["source_routes_enforced"] is False
     assert payload["candidates"][0]["source_identity"] == "resolved"
-    assert payload["candidates"][0]["claim_support"] == "candidate_support"
+    assert payload["candidates"][0]["claim_support"] == "unassessed"
     assert payload["candidates"][0]["promotion"] == "never_automatic"
 
 

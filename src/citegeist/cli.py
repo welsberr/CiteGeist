@@ -27,6 +27,8 @@ from .extract import (
 from .harvest import OaiPmhHarvester
 from .llm_verify import VerificationLlmConfig
 from .resolve import MetadataResolver, merge_entries_with_conflicts
+from .research_discovery import DISCOVERY_SOURCES, ResearchBrief, discover_references
+from .sources import SourceTLSFailure
 from .storage import BibliographyStore, SearchIndexError, SearchQueryError, resolve_database_path
 from .verify import BibliographyVerifier, render_verification_results
 
@@ -36,6 +38,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", default=None, help="Path to the SQLite database (overrides CITEGEIST_DB)")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("sources", help="List source coverage, access requirements, and integration status")
+    discovery = subparsers.add_parser("discover", help="Find report or economic-series metadata for review")
+    discovery.add_argument("source", choices=["worldbank", "fred"])
+    discovery.add_argument("query")
+    discovery.add_argument("--limit", type=int, default=10)
+
+    research_parser = subparsers.add_parser(
+        "research",
+        help="Search selected bibliography sources and return candidates without storing them",
+    )
+    research_parser.add_argument("query", help="Research question or topic phrase")
+    research_parser.add_argument(
+        "--source", action="append", choices=DISCOVERY_SOURCES,
+        help="Search this source (repeatable); defaults to local corpus only",
+    )
+    research_parser.add_argument("--limit", type=int, default=10, help="Maximum candidates per source")
+    research_parser.add_argument("--topic", help="Optional local topic slug filter")
 
     ingest_parser = subparsers.add_parser("ingest", help="Ingest BibTeX into the database")
     ingest_parser.add_argument("input", help="BibTeX file to ingest")
@@ -170,9 +190,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify or disambiguate free-text references or BibTeX entries without modifying the database",
     )
     verify_group = verify_parser.add_mutually_exclusive_group(required=True)
-    verify_group.add_argument("--string", help="Single free-text reference query")
+    verify_group.add_argument("--string", "--doi", "--arxiv", help="Single free-text reference query")
     verify_group.add_argument("--list", dest="list_input", help="Path to a text file with one query per line")
     verify_group.add_argument("--bib", help="Path to a BibTeX file whose entries should be verified")
+    verify_parser.add_argument("--trace", action="store_true", help="Log per-request host, retry, and elapsed time to stderr")
     verify_parser.add_argument("--context", default="", help="Optional topic context used for scoring")
     verify_parser.add_argument("--limit", type=int, default=5, help="Maximum candidates to inspect per input")
     verify_parser.add_argument("--llm", action="store_true", help="Enable optional local LLM assistance for verify")
@@ -473,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run multiple bootstrap jobs from a JSON specification file",
     )
     batch_parser.add_argument("input", help="Path to batch JSON file")
+    batch_parser.add_argument("--receipt", help="Atomic JSON job receipt for inspection and recovery")
+    batch_parser.add_argument("--resume", action="store_true", help="Resume from a receipt, skipping completed jobs and retrying failed, partial, or interrupted jobs")
 
     talkorigins_parser = subparsers.add_parser(
         "example-talkorigins-scrape",
@@ -781,6 +804,29 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "sources":
+        from .sources import list_source_catalog
+        print(json.dumps([asdict(entry) for entry in list_source_catalog()], indent=2))
+        return 0
+    if args.command == "discover":
+        from .discovery import search_material
+        try:
+            print(render_bibtex(search_material(args.source, args.query, args.limit)))
+        except (ValueError, RuntimeError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
+    if args.command == "research":
+        try:
+            brief = ResearchBrief(
+                query=args.query,
+                sources=tuple(args.source or ("local",)),
+                per_source_limit=args.limit,
+                topic_slug=args.topic,
+            )
+        except ValueError as exc:
+            print(f"Research brief error: {exc}", file=sys.stderr)
+            return 2
     args.db = resolve_database_path(args.db)
 
     if args.command == "confidence-restore":
@@ -790,6 +836,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "ingest":
             return _run_ingest(store, Path(args.input), args.status, args.source_label)
+        if args.command == "research":
+            report = discover_references(brief, store=store)
+            print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
+            return 0
         if args.command == "search":
             return _run_search(store, args.query, args.limit, args.topic)
         if args.command == "db-status":
@@ -833,6 +883,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.output,
             )
         if args.command == "verify":
+            if args.trace:
+                import logging
+                logging.basicConfig(level=logging.DEBUG)
             return _run_verify(
                 args.string,
                 args.list_input,
@@ -941,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.max_expand_seconds,
             )
         if args.command == "bootstrap-batch":
-            return _run_bootstrap_batch(store, Path(args.input))
+            return _run_bootstrap_batch(store, Path(args.input), Path(args.receipt) if args.receipt else None, args.resume)
         if args.command in {"example-talkorigins-scrape", "scrape-talkorigins"}:
             return _run_scrape_talkorigins(
                 store,
@@ -1028,6 +1081,9 @@ def main(argv: list[str] | None = None) -> int:
             return _run_export_topic(store, args.topic_slug, args.output, args.include_stubs)
         if args.command == "export-notebook-topic":
             return _run_export_notebook_topic(store, args.topic_slug, args.output_dir, args.include_stubs)
+    except SourceTLSFailure as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     finally:
         store.close()
 
@@ -2132,11 +2188,24 @@ def _run_bootstrap(
     return 0
 
 
-def _run_bootstrap_batch(store: BibliographyStore, input_path: Path) -> int:
+def _run_bootstrap_batch(
+    store: BibliographyStore,
+    input_path: Path,
+    receipt_path: Path | None = None,
+    resume: bool = False,
+) -> int:
     jobs = load_batch_jobs(input_path)
     runner = BatchBootstrapRunner()
     _print_phase(f"Running bootstrap batch with {len(jobs)} jobs")
-    results = runner.run(store, jobs)
+    try:
+        results = runner.run(store, jobs, receipt_path=receipt_path, resume=resume)
+    except (ValueError, OSError) as exc:
+        print(f"Bootstrap batch error: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        detail = f" Receipt: {receipt_path}" if receipt_path else ""
+        print(f"Bootstrap batch stopped after a job failure ({type(exc).__name__}: {exc}).{detail}", file=sys.stderr)
+        return 1
     payload = []
     total = len(results)
     for index, job_result in enumerate(results, start=1):

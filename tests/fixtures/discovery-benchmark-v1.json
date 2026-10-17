@@ -1,0 +1,31 @@
+{
+  "benchmark_id": "citegeist-discovery-pilot-v1",
+  "schema_version": 1,
+  "description": "Synthetic pilot labels for deterministic offline receipt plumbing; these are not empirical relevance judgments.",
+  "cases": [
+    {
+      "case_id": "known-item-01",
+      "query": "Find the foundational paper identified by this topic brief.",
+      "source_types": ["article"],
+      "relevant_ids": ["doi:10.5555/example.known-item"]
+    },
+    {
+      "case_id": "general-reference-01",
+      "query": "Find an authoritative handbook or institutional reference on the stated topic.",
+      "source_types": ["book", "report", "documentation"],
+      "relevant_ids": ["isbn:9780000000001", "report:EXAMPLE-42"]
+    },
+    {
+      "case_id": "exploratory-01",
+      "query": "Find distinct research sources on a methods question.",
+      "source_types": ["article", "dataset"],
+      "relevant_ids": ["doi:10.5555/example.method-a", "doi:10.5555/example.method-b"]
+    },
+    {
+      "case_id": "no-known-answer-01",
+      "query": "A deliberately unanswerable pilot query with no known relevant source.",
+      "source_types": ["article", "book", "report"],
+      "relevant_ids": []
+    }
+  ]
+}

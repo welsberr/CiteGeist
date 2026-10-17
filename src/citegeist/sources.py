@@ -4,6 +4,17 @@ import http.client
 import hashlib
 import json
 import time
+import os
+import ssl
+import logging
+from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
+
+
+class SourceTLSFailure(RuntimeError):
+    """Certificate errors must not be interpreted as missing metadata."""
+
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -18,8 +29,15 @@ class SourceClient:
         fixtures_dir: str | Path | None = None,
         max_retries: int = 2,
         retry_backoff_seconds: float = 1.0,
+        timeout_seconds: float = 15.0,
+        ca_bundle: str | Path | None = None,
     ) -> None:
         self.user_agent = user_agent
+        self.timeout_seconds = float(os.environ.get("CITEGEIST_HTTP_TIMEOUT", timeout_seconds))
+        if self.timeout_seconds <= 0:
+            raise ValueError("HTTP timeout must be positive")
+        bundle = ca_bundle or os.environ.get("CITEGEIST_CA_BUNDLE") or os.environ.get("REQUESTS_CA_BUNDLE")
+        self.ssl_context = ssl.create_default_context(cafile=str(bundle)) if bundle else None
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.fixtures_dir = Path(fixtures_dir) if fixtures_dir else None
         self.max_retries = max(0, max_retries)
@@ -92,8 +110,14 @@ class SourceClient:
     def _fetch_bytes(self, url: str) -> bytes:
         for attempt in range(self.max_retries + 1):
             try:
-                with urllib.request.urlopen(self._request(url)) as response:
+                started = time.monotonic()
+                options = {"timeout": self.timeout_seconds}
+                if self.ssl_context is not None:
+                    options["context"] = self.ssl_context
+                with urllib.request.urlopen(self._request(url), **options) as response:
                     return response.read()
+            except ssl.SSLCertVerificationError as exc:
+                raise SourceTLSFailure("TLS certificate verification failed; set CITEGEIST_CA_BUNDLE or SSL_CERT_FILE to your trusted PEM certificate bundle") from exc
             except http.client.RemoteDisconnected:
                 if attempt >= self.max_retries:
                     raise
@@ -102,10 +126,14 @@ class SourceClient:
                 if exc.code not in {429, 500, 502, 503, 504} or attempt >= self.max_retries:
                     raise
                 self._sleep_before_retry(attempt)
-            except urllib.error.URLError:
+            except urllib.error.URLError as exc:
+                if isinstance(exc.reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc.reason):
+                    raise SourceTLSFailure("TLS certificate verification failed; set CITEGEIST_CA_BUNDLE or SSL_CERT_FILE to your trusted PEM certificate bundle") from exc
                 if attempt >= self.max_retries:
                     raise
                 self._sleep_before_retry(attempt)
+            finally:
+                logger.debug("HTTP host=%s attempt=%d elapsed=%.3fs", urlsplit(url).hostname, attempt + 1, time.monotonic() - started)
         raise RuntimeError("unreachable")
 
     def _request(self, url: str) -> urllib.request.Request:

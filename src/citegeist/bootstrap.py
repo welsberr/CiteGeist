@@ -76,11 +76,13 @@ class Bootstrapper:
         }
         results: list[BootstrapResult] = []
         seed_keys: list[str] = []
+        seed_entries: list[BibEntry] = []
         effective_topic_slug = topic_slug or (_slugify(topic) if topic else None)
         effective_topic_name = topic_name or topic
 
         if seed_bibtex:
             for entry in parse_bibtex(seed_bibtex):
+                seed_entries.append(entry)
                 created = store.get_entry(entry.citation_key) is None
                 if not preview_only:
                     store.upsert_entry(
@@ -122,7 +124,7 @@ class Bootstrapper:
                     expansion_phrase=topic_phrase or topic,
                 )
             candidate_limit = max(topic_limit, topic_commit_limit or 0)
-            ranked_candidates = self._topic_candidates(topic, seed_keys, candidate_limit)
+            ranked_candidates = self._topic_candidates(topic, seed_entries, candidate_limit)
             if not preview_only:
                 ranked_candidates = [
                     (entry, score)
@@ -358,7 +360,7 @@ class Bootstrapper:
         })
         return results
 
-    def _topic_candidates(self, topic: str, seed_keys: list[str], limit: int) -> list[tuple[BibEntry, float]]:
+    def _topic_candidates(self, topic: str, seed_entries: list[BibEntry], limit: int) -> list[tuple[BibEntry, float]]:
         scored: dict[str, tuple[BibEntry, float]] = {}
 
         for _source_name, base_score, entries in (
@@ -368,7 +370,7 @@ class Bootstrapper:
             ("datacite", 1.5, self.resolver.search_datacite(topic, limit=limit)),
         ):
             for entry in entries:
-                score = base_score + _topic_relevance_score(entry, topic) + _seed_overlap_score(entry, seed_keys)
+                score = base_score + _topic_relevance_score(entry, topic) + _seed_overlap_score(entry, seed_entries)
                 existing = scored.get(entry.citation_key)
                 if existing is None or score > existing[1]:
                     scored[entry.citation_key] = (entry, score)
@@ -392,16 +394,27 @@ def _topic_relevance_score(entry: BibEntry, topic: str) -> float:
     return float(overlap)
 
 
-def _seed_overlap_score(entry: BibEntry, seed_keys: list[str]) -> float:
-    if not seed_keys:
+def _seed_overlap_score(entry: BibEntry, seed_entries: list[BibEntry]) -> float:
+    if not seed_entries:
         return 0.0
-    title_terms = _tokenize(entry.fields.get("title", ""))
+
+    candidate_terms = _entry_content_terms(entry)
     score = 0.0
-    for seed_key in seed_keys:
-        seed_terms = _tokenize(seed_key)
-        if seed_terms & title_terms:
+    for seed_entry in seed_entries:
+        seed_terms = _entry_content_terms(seed_entry)
+        if seed_terms & candidate_terms:
             score += 0.25
     return score
+
+
+def _entry_content_terms(entry: BibEntry) -> set[str]:
+    """Return searchable bibliographic content, excluding generated citation keys."""
+    fields = entry.fields
+    content = " ".join(
+        fields.get(field, "")
+        for field in ("title", "abstract", "keywords", "keyword", "subject")
+    )
+    return _tokenize(content)
 
 
 def _tokenize(value: str) -> set[str]:

@@ -15,6 +15,7 @@ class SourceCatalogEntry:
     caveats: str
     current_status: str
     priority: str
+    documentation_url: str = ""
 
 
 _CATALOG: tuple[SourceCatalogEntry, ...] = (
@@ -161,6 +162,13 @@ _CATALOG: tuple[SourceCatalogEntry, ...] = (
         current_status="integrated",
         priority="selective",
     ),
+    SourceCatalogEntry('worldbank', 'World Bank Documents & Reports', 'government+economics', 'open API', ('report_search',), 'Development economics, policy reports and working papers.', 'Discovery returns unverified metadata; documents have their own rights.', 'integrated', 'next', 'https://documents.worldbank.org/en/publication/documents-reports/api'),
+    SourceCatalogEntry('fred', 'FRED / ALFRED', 'economics+finance', 'personal API key', ('series_search',), 'Macroeconomics, labor, prices, rates, credit and financial series.', 'Requires FRED_API_KEY; series are data, not publications; preserve vintage and original producer.', 'integrated', 'next', 'https://fred.stlouisfed.org/docs/api/fred/'),
+    SourceCatalogEntry('bls', 'Bureau of Labor Statistics', 'government+economics', 'public API; optional registration', ('series_lookup',), 'Employment, unemployment, wages, productivity and consumer prices.', 'API requires series IDs; not a literature or keyword search API. Adapter not yet implemented.', 'planned', 'next', 'https://www.bls.gov/developers/'),
+    SourceCatalogEntry('osti', 'OSTI.GOV', 'government+repository', 'open API and OAI-PMH', ('reports', 'theses'), 'DOE-funded technical reports, datasets and theses/dissertations.', 'Domain coverage is energy and related sciences; dedicated adapter not yet implemented.', 'planned', 'next', 'https://www.osti.gov/api/v1/docs'),
+    SourceCatalogEntry('reliefweb', 'ReliefWeb', 'ngo+government', 'API with application identification', ('reports',), 'Humanitarian NGO and government reports with source organizations.', 'Check application registration and quotas; original sources retain rights. Adapter not yet implemented.', 'planned', 'next', 'https://apidoc.reliefweb.int/'),
+    SourceCatalogEntry('base', 'BASE repositories', 'theses+repository', 'OAI-PMH subject to access conditions', ('repository_harvest',), 'Institutional theses and dissertations; normalized thesis types.', 'Confirm access and supported metadata format before using harvest-oai; no dedicated adapter.', 'planned', 'next', 'https://oai.base-search.net/'),
+    SourceCatalogEntry('repec', 'RePEc / IDEAS', 'economics+finance', 'distributed metadata and OAI-PMH', ('working_papers',), 'Economics working papers, journal articles and institution series.', 'Agree bulk reuse with providers; ReDIF/AMF need dedicated normalization.', 'planned', 'next', 'https://ideas.repec.org/getdata.html'),
 )
 
 

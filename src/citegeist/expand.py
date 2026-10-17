@@ -54,7 +54,7 @@ class CrossrefExpander:
             return []
 
         payload = self.resolver.source_client.try_get_json(
-            f"https://api.crossref.org/works/{doi}?mailto=welsberr@gmail.com"
+            f"https://api.crossref.org/works/{doi}"
         )
         if payload is None:
             return []
@@ -498,7 +498,7 @@ class TopicExpander:
             return []
         doi = str(entry["doi"])
         payload = self.crossref_expander.resolver.source_client.try_get_json(
-            f"https://api.crossref.org/works/{doi}?mailto=welsberr@gmail.com"
+            f"https://api.crossref.org/works/{doi}"
         )
         if payload is None:
             return []

@@ -1,5 +1,10 @@
 # CiteGeist Roadmap: Sources-First Expansion
 
+This source landscape remains the authority for provider prioritization. The
+[discovery and improvement roadmap](docs/discovery-research-and-improvement-roadmap.md)
+is the operational plan for turning available sources into useful, evaluated
+research workflows; it does not replace this source-selection plan.
+
 The unified confidence overhaul is in progress. Its audited cross-repository
 status is maintained in Epistemap at
 `docs/confidence-overhaul-implementation-status.md`; CiteGeist's typed

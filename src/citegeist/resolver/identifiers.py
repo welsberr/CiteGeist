@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 
 # Identifier scheme patterns
@@ -46,6 +47,55 @@ OPENALEX_PATTERN = re.compile(
     r'^W[0-9]{4}-[A-F0-9]{4}$',
     re.IGNORECASE
 )
+
+_DOI_TEXT_PATTERN = re.compile(r"10\.\d{4,9}/[^\s<>\"{}]+", re.IGNORECASE)
+_ARXIV_TEXT_PATTERN = re.compile(
+    r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?", re.IGNORECASE
+)
+
+
+def extract_doi(value: str) -> str:
+    """Extract a DOI from a field, DOI URL, or citation string."""
+    match = _DOI_TEXT_PATTERN.search(unquote(str(value or "")))
+    if not match:
+        return ""
+    doi = match.group().rstrip(".,;:")
+    while doi.endswith(")") and doi.count(")") > doi.count("("):
+        doi = doi[:-1]
+    return doi
+
+
+def extract_arxiv(value: str, *, bare: bool = False) -> str:
+    """Extract modern or legacy arXiv IDs from common citation forms."""
+    text = unquote(str(value or "")).strip()
+    match = re.search(
+        r"(?:arxiv\s*:\s*|arxiv\.org/(?:abs|pdf)/)(" + _ARXIV_TEXT_PATTERN.pattern + r")",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+    if bare and re.fullmatch(_ARXIV_TEXT_PATTERN, text):
+        return text
+    return ""
+
+
+def entry_identifiers(fields: Dict[str, str]) -> tuple[str, str]:
+    """Extract DOI and arXiv ID from canonical and citation-text fields."""
+    doi = ""
+    for key in ("doi", "url", "note", "howpublished"):
+        doi = extract_doi(fields.get(key, ""))
+        if doi:
+            break
+    arxiv = extract_arxiv(fields.get("arxiv", ""), bare=True)
+    if not arxiv and fields.get("archiveprefix", "").strip().casefold() == "arxiv":
+        arxiv = extract_arxiv(fields.get("eprint", ""), bare=True)
+    if not arxiv:
+        for key in ("url", "note", "howpublished"):
+            arxiv = extract_arxiv(fields.get(key, ""))
+            if arxiv:
+                break
+    return doi, arxiv
 
 
 class IdentifierExtractor:

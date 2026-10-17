@@ -16,6 +16,10 @@ This documentation therefore emphasizes:
 ## Documentation Files
 
 ### Planning and Status
+- **[discovery-research-and-improvement-roadmap.md](./discovery-research-and-improvement-roadmap.md)** - operational discovery capabilities, research experiments, adoption criteria, and bounded agent self-improvement
+- **[process-improvement-roadmap.md](./process-improvement-roadmap.md)** - verification correctness, model provenance, evaluation, and recoverable-work priorities
+- **[lede-brief-integration-roadmap.md](./lede-brief-integration-roadmap.md)** - gated optional scholarly brief integration
+- **[groundrecall-unified-retrieval-integration-plan.md](./groundrecall-unified-retrieval-integration-plan.md)** - separately gated cross-repository retrieval pilot
 - **[epistemap-knowledge-graph-roadmap.md](./epistemap-knowledge-graph-roadmap.md)** - provenance-aware graph operations and cross-repository integration plan
 - **[topic-search-hardening-roadmap.md](./topic-search-hardening-roadmap.md)** - implementation-ready plan for safe FTS5 queries, database diagnostics, schema lifecycle, and index recovery
 - **[source-landscape.md](./source-landscape.md)** - recommended next open bibliographic sources
@@ -57,6 +61,26 @@ The source-layer code now provides:
 - compatibility with the existing `SourceClient`-based resolver and expander code
 
 ## Quick Start
+
+The initial read-only research contract can be used from the CLI. Local search is
+the default; specify each external source explicitly. Candidate results are returned
+for review and are not written into the bibliography:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m citegeist --db library.sqlite3 research \
+  "methods for evaluating artificial life" --source local --source openalex --source crossref
+```
+
+The JSON report includes per-source outcome counts, candidate records, provider
+rank/provenance, and a complete/partial/empty-corpus/no-match/provider-failure/
+inconclusive outcome. Some legacy
+resolver methods still collapse certain transport failures into empty results;
+those cases are marked inconclusive rather than as confirmed no-match results.
+
+`citegeist discover` is a separate BibTeX-oriented command for World Bank and FRED
+material. `citegeist research` returns a read-only candidate JSON report from the
+local corpus and explicitly selected scholarly adapters; neither command verifies
+whether a result supports a particular claim.
 
 ```python
 from citegeist.sources import (

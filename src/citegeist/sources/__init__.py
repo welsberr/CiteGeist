@@ -38,7 +38,10 @@ __all__ = [
     'UnpaywallSource',
     # Old API (for backward compatibility)
     'SourceClient',
+    'SourceTLSFailure',
 ]
 
 # Backward compatibility - make SourceClient available from this module
 SourceClient = _old_sources_compat.SourceClient
+
+SourceTLSFailure = _old_sources_compat.old_sources.SourceTLSFailure

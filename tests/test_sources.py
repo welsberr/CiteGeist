@@ -80,7 +80,7 @@ def test_source_client_retries_remote_disconnects(tmp_path: Path):
     import urllib.request
 
     original_urlopen = urllib.request.urlopen
-    urllib.request.urlopen = lambda _request: FakeResponse()  # type: ignore[assignment]
+    urllib.request.urlopen = lambda _request, **kwargs: FakeResponse()  # type: ignore[assignment]
     try:
         payload = client.get_json("https://example.org/test")
     finally:

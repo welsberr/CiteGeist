@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from .bibtex import BibEntry
 
@@ -16,6 +18,28 @@ DEFAULT_SYSTEM_PROMPT = (
     "When uncertain, return null or an empty list. "
     "Always respond with strict JSON matching the requested shape."
 )
+
+LlmOutcomeStatus = Literal[
+    "disabled",
+    "success",
+    "abstained",
+    "invalid_response",
+    "timeout",
+    "provider_error",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationLlmOutcome:
+    """Typed diagnostic for the most recent clue or ranking operation."""
+
+    operation: Literal["expand", "rerank"]
+    status: LlmOutcomeStatus
+    detail: str | None = None
+
+
+class _InvalidModelResponse(ValueError):
+    pass
 
 
 @dataclass(slots=True)
@@ -35,10 +59,28 @@ class VerificationLlmClient:
         self,
         *,
         timeout_s: int = 60,
+        max_output_tokens: int = 512,
         post_json: Callable[[str, dict[str, Any], dict[str, str], int], dict[str, Any]] | None = None,
     ) -> None:
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        if max_output_tokens <= 0:
+            raise ValueError("max_output_tokens must be positive")
         self.timeout_s = timeout_s
+        self.max_output_tokens = max_output_tokens
         self._post_json = post_json or _default_post_json
+        self.last_outcome: VerificationLlmOutcome | None = None
+        self.outcomes: dict[Literal["expand", "rerank"], VerificationLlmOutcome] = {}
+
+    def _record_outcome(
+        self,
+        operation: Literal["expand", "rerank"],
+        status: LlmOutcomeStatus,
+        detail: str | None = None,
+    ) -> None:
+        outcome = VerificationLlmOutcome(operation, status, detail)
+        self.last_outcome = outcome
+        self.outcomes[operation] = outcome
 
     def analyze_query(
         self,
@@ -47,6 +89,7 @@ class VerificationLlmClient:
         context: str,
     ) -> dict[str, Any] | None:
         if not config.enabled_for("expand"):
+            self._record_outcome("expand", "disabled")
             return None
         payload = {
             "task": "extract_bibliographic_clues",
@@ -68,18 +111,18 @@ class VerificationLlmClient:
                 "required": ["authors", "keywords"],
             },
         }
-        result = self._chat_json(config, payload)
-        if not isinstance(result, dict):
+        try:
+            result = self._chat_json(config, payload)
+            clues = _validate_clues(result)
+        except _InvalidModelResponse as exc:
+            self._record_outcome("expand", "invalid_response", str(exc))
             return None
-        authors = [str(value).strip() for value in result.get("authors", []) if str(value).strip()]
-        keywords = [str(value).strip() for value in result.get("keywords", []) if str(value).strip()]
-        return {
-            "title": _optional_string(result.get("title")),
-            "authors": authors,
-            "year": _optional_string(result.get("year")),
-            "venue": _optional_string(result.get("venue")),
-            "keywords": keywords,
-        }
+        except Exception as exc:
+            self._record_outcome("expand", _failure_status(exc), _error_detail(exc))
+            return None
+        useful = bool(clues["title"] or clues["year"] or clues["venue"] or clues["authors"] or clues["keywords"])
+        self._record_outcome("expand", "success" if useful else "abstained")
+        return clues
 
     def rerank_candidates(
         self,
@@ -88,8 +131,13 @@ class VerificationLlmClient:
         context: str,
         candidates: list[BibEntry],
     ) -> list[int] | None:
-        if not config.enabled_for("rerank") or not candidates:
+        if not config.enabled_for("rerank"):
+            self._record_outcome("rerank", "disabled")
             return None
+        if not candidates:
+            self._record_outcome("rerank", "abstained", "No candidates were supplied.")
+            return None
+        submitted_count = min(len(candidates), 8)
         payload = {
             "task": "rerank_candidates",
             "instruction": (
@@ -111,19 +159,25 @@ class VerificationLlmClient:
                 ],
             },
         }
-        result = self._chat_json(config, payload)
-        if not isinstance(result, list):
+        try:
+            result = self._chat_json(config, payload)
+            indices = _validate_ranking(result, submitted_count)
+        except _InvalidModelResponse as exc:
+            self._record_outcome("rerank", "invalid_response", str(exc))
             return None
-        indices = [value for value in result if isinstance(value, int) and 0 <= value < len(candidates)]
-        return indices or None
+        except Exception as exc:
+            self._record_outcome("rerank", _failure_status(exc), _error_detail(exc))
+            return None
+        if not indices:
+            self._record_outcome("rerank", "abstained")
+            return None
+        self._record_outcome("rerank", "success")
+        return indices
 
     def _chat_json(self, config: VerificationLlmConfig, payload: dict[str, Any]) -> Any:
-        try:
-            if _llm_mode(config.base_url, config.provider) == "openai":
-                return self._chat_openai(config, payload)
-            return self._chat_ollama_native(config, payload)
-        except Exception:
-            return None
+        if _llm_mode(config.base_url, config.provider) == "openai":
+            return self._chat_openai(config, payload)
+        return self._chat_ollama_native(config, payload)
 
     def _chat_openai(self, config: VerificationLlmConfig, payload: dict[str, Any]) -> Any:
         headers = {"Content-Type": "application/json"}
@@ -132,6 +186,7 @@ class VerificationLlmClient:
         body = {
             "model": config.model,
             "temperature": 0,
+            "max_tokens": self.max_output_tokens,
             "messages": [
                 {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(payload)},
@@ -143,7 +198,7 @@ class VerificationLlmClient:
             headers,
             self.timeout_s,
         )
-        content = data["choices"][0]["message"]["content"]
+        content = _extract_content(data, ("choices", 0, "message", "content"))
         return _loads_lenient_json(content)
 
     def _chat_ollama_native(self, config: VerificationLlmConfig, payload: dict[str, Any]) -> Any:
@@ -156,7 +211,7 @@ class VerificationLlmClient:
                 {"role": "system", "content": DEFAULT_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(payload)},
             ],
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_predict": self.max_output_tokens},
             "stream": False,
         }
         headers = {"Content-Type": "application/json"}
@@ -168,7 +223,7 @@ class VerificationLlmClient:
             headers,
             self.timeout_s,
         )
-        content = data["message"]["content"]
+        content = _extract_content(data, ("message", "content"))
         return _loads_lenient_json(content)
 
 
@@ -191,28 +246,92 @@ def _llm_mode(base_url: str, provider: str) -> str:
     return "openai" if base_url.rstrip("/").endswith("/v1") else "ollama-native"
 
 
-def _optional_string(value: object) -> str | None:
-    text = str(value or "").strip()
-    return text or None
+def _validate_clues(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise _InvalidModelResponse("Expected a JSON object for bibliographic clues.")
+    allowed = {"title", "authors", "year", "venue", "keywords"}
+    if value.keys() - allowed:
+        raise _InvalidModelResponse("Clue response contains unsupported fields.")
+    for field in ("authors", "keywords"):
+        if field not in value or not isinstance(value[field], list):
+            raise _InvalidModelResponse(f"Clue field '{field}' must be a list of strings.")
+        if any(not isinstance(item, str) for item in value[field]):
+            raise _InvalidModelResponse(f"Clue field '{field}' must contain only strings.")
+    for field in ("title", "year", "venue"):
+        if field in value and value[field] is not None and not isinstance(value[field], str):
+            raise _InvalidModelResponse(f"Clue field '{field}' must be a string or null.")
+    normalized = {
+        field: (value.get(field, "") or "").strip() or None
+        for field in ("title", "year", "venue")
+    }
+    normalized["authors"] = [item.strip() for item in value["authors"] if item.strip()]
+    normalized["keywords"] = [item.strip() for item in value["keywords"] if item.strip()]
+    return normalized
+
+
+def _validate_ranking(value: Any, submitted_count: int) -> list[int]:
+    if not isinstance(value, list):
+        raise _InvalidModelResponse("Expected a JSON array of candidate indices.")
+    if any(isinstance(index, bool) or not isinstance(index, int) for index in value):
+        raise _InvalidModelResponse("Candidate ranks must be integer indices.")
+    if any(index < 0 or index >= submitted_count for index in value):
+        raise _InvalidModelResponse("Candidate rank is outside the submitted candidate subset.")
+    if len(value) != len(set(value)):
+        raise _InvalidModelResponse("Candidate ranks must not contain duplicates.")
+    return value
+
+
+def _extract_content(data: Any, path: tuple[object, ...]) -> str:
+    current = data
+    try:
+        for part in path:
+            current = current[part]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise _InvalidModelResponse("Provider response did not contain message content.") from exc
+    if not isinstance(current, str) or not current.strip():
+        raise _InvalidModelResponse("Provider returned empty or non-text message content.")
+    return current
+
+
+def _failure_status(exc: Exception) -> Literal["timeout", "provider_error"]:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return "timeout"
+    if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, (TimeoutError, socket.timeout)):
+        return "timeout"
+    return "provider_error"
+
+
+def _error_detail(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _loads_lenient_json(content: str) -> Any:
-    try:
-        return json.loads(content)
-    except Exception:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*(\{.*\}|\[.*\])\s*```", content, flags=re.DOTALL)
+    if not isinstance(content, str):
+        raise _InvalidModelResponse("Model response content must be text.")
+    text = content.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
     if fenced:
-        return json.loads(fenced.group(1))
+        text = fenced.group(1).strip()
+    try:
+        return json.loads(
+            text,
+            object_pairs_hook=_unique_object_pairs,
+            parse_constant=_reject_non_finite,
+        )
+    except _InvalidModelResponse:
+        raise
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise _InvalidModelResponse("Model response must contain exactly one complete JSON value.") from exc
 
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start = content.find(opener)
-        end = content.rfind(closer)
-        if start != -1 and end != -1 and end > start:
-            snippet = content[start : end + 1]
-            try:
-                return json.loads(snippet)
-            except Exception:
-                continue
-    raise ValueError("Model response did not contain parseable JSON")
+
+def _unique_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _InvalidModelResponse(f"Model response contains duplicate JSON key '{key}'.")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite(value: str) -> Any:
+    raise _InvalidModelResponse(f"Model response contains non-finite number '{value}'.")

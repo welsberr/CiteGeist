@@ -1,6 +1,35 @@
 # Roadmap
 
+The [discovery and improvement roadmap](docs/discovery-research-and-improvement-roadmap.md)
+sets out the next operational capabilities, a staged research programme, and
+evidence-based adoption rules for bounded agent self-improvement. It builds on
+the existing source and process plans; its work packages remain proposed.
+
+The proposed [lede-brief scholarly integration](docs/lede-brief-integration-roadmap.md)
+adds a consumer profile for the shared transformation library while retaining
+CiteGeist authority over bibliographic identity, provenance and citation review.
+
+The [process review and improvement roadmap](docs/process-improvement-roadmap.md)
+records the 3 October 2026 code review and offline probes. Initial implementation
+slices are present in this working tree; regression qualification, model provenance,
+and broader evaluation remain open.
+
+The bounded companion plan for GroundRecall's unified prior-work retrieval pilot
+is [`docs/groundrecall-unified-retrieval-integration-plan.md`](docs/groundrecall-unified-retrieval-integration-plan.md).
+It is blocked on GroundRecall's store-reconciliation gate and leaves
+bibliographic identity, provenance, conflicts, and review authority in
+CiteGeist.
+
 This roadmap prioritizes a usable local research workflow over breadth of integrations.
+
+An initial offline recorded-run scorer is available as
+`python -m citegeist.eval_baseline`; its synthetic fixtures validate receipt plumbing,
+not retrieval quality. `citegeist research` now offers a read-only brief/report
+contract over selected current adapters. Topic ranking uses seed bibliographic
+content, and `bootstrap-batch --receipt PATH` can atomically checkpoint jobs for
+`--resume`. These are early implementation slices; human-reviewed benchmark labels,
+integration tests, and full source-failure visibility are still required before
+quality or reliability claims.
 
 The first objective is not to support every metadata source. The first objective is to make one end-to-end path work reliably:
 

@@ -115,6 +115,9 @@ def _bounded_claim_evidence_check(arguments: dict[str, Any]) -> dict[str, Any]:
             context=str(arguments.get("context", "")),
             max_results=int(arguments.get("max_results", 3)),
             allowed_source_routes=list(arguments.get("allowed_source_routes") or []),
+            require_source_route_restrictions=bool(
+                arguments.get("require_source_route_restrictions", False)
+            ),
         )
     )
 
@@ -182,6 +185,11 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "context": {"type": "string"},
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
                 "allowed_source_routes": {"type": "array", "items": {"type": "string"}},
+                "require_source_route_restrictions": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Require route restrictions to be enforced; unsupported mandatory routes cause retrieval to be skipped.",
+                },
             },
         },
         "handler": _bounded_claim_evidence_check,

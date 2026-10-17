@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 from .bibtex import BibEntry, parse_bibtex
+from .resolver.identifiers import entry_identifiers, extract_arxiv
 from .sources.europepmc import EuropePmcSource
 from .sources.openlibrary import OpenLibrarySource
 from .sources.semanticscholar import SemanticScholarSource
@@ -64,7 +65,8 @@ class MetadataResolver:
 
     def resolve_entry_with_trace(self, entry: BibEntry) -> ResolutionOutcome:
         attempts: list[ResolutionAttempt] = []
-        if doi := entry.fields.get("doi"):
+        doi, arxiv_id = entry_identifiers(entry.fields)
+        if doi:
             resolved = self._attempt_direct_resolution(attempts, "crossref", "doi_lookup", doi, self.resolve_doi)
             if resolved is not None:
                 return ResolutionOutcome(resolution=resolved, attempts=attempts)
@@ -101,7 +103,7 @@ class MetadataResolver:
             if resolved is not None:
                 return ResolutionOutcome(resolution=resolved, attempts=attempts)
 
-        if arxiv_id := entry.fields.get("arxiv"):
+        if arxiv_id:
             resolved = self._attempt_direct_resolution(
                 attempts, "arxiv", "id_lookup", arxiv_id, self.resolve_arxiv
             )
@@ -220,13 +222,16 @@ class MetadataResolver:
         return results
 
     def resolve_arxiv(self, arxiv_id: str) -> Resolution | None:
+        arxiv_id = extract_arxiv(arxiv_id, bare=True)
+        if not arxiv_id:
+            return None
         query = urllib.parse.urlencode({"id_list": arxiv_id})
         root = self._safe_get_xml(f"https://export.arxiv.org/api/query?{query}")
         if root is None:
             return None
         namespace = {"atom": "http://www.w3.org/2005/Atom"}
         entry = root.find("atom:entry", namespace)
-        if entry is None:
+        if entry is None or not extract_arxiv(entry.findtext("atom:id", "", namespace)):
             return None
         return Resolution(
             entry=_arxiv_atom_entry_to_bib(entry, arxiv_id),

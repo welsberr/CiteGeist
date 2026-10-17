@@ -1,0 +1,52 @@
+{
+  "run_id": "synthetic-offline-example-v1",
+  "schema_version": 1,
+  "corpus": {
+    "id": "synthetic-recorded-fixture",
+    "snapshot": "sha256:synthetic-fixture-no-production-database",
+    "entry_count": 100
+  },
+  "provenance": {
+    "retriever": "synthetic-example",
+    "configuration_sha256": "synthetic"
+  },
+  "cases": [
+    {
+      "case_id": "known-item-01",
+      "outcome": "complete",
+      "providers": [{"name": "recorded-local", "status": "success"}],
+      "candidates": [
+        {"id": "doi:10.5555/example.known-item", "source_type": "article"},
+        {"id": "doi:10.5555/example.distractor", "source_type": "article"}
+      ]
+    },
+    {
+      "case_id": "general-reference-01",
+      "outcome": "partial",
+      "providers": [
+        {"name": "recorded-catalog", "status": "success"},
+        {"name": "recorded-web", "status": "unavailable"}
+      ],
+      "candidates": [
+        {"id": "isbn:9780000000001", "source_type": "book"},
+        {"id": "report:EXAMPLE-42", "source_type": "report"}
+      ]
+    },
+    {
+      "case_id": "exploratory-01",
+      "outcome": "complete",
+      "providers": [{"name": "recorded-local", "status": "success"}],
+      "candidates": [
+        {"id": "doi:10.5555/example.method-b", "source_type": "article"},
+        {"id": "doi:10.5555/example.other", "source_type": "article"},
+        {"id": "doi:10.5555/example.method-a", "source_type": "dataset"}
+      ]
+    },
+    {
+      "case_id": "no-known-answer-01",
+      "outcome": "no_matches",
+      "providers": [{"name": "recorded-local", "status": "success"}],
+      "candidates": []
+    }
+  ]
+}

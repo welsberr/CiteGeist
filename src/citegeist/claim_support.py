@@ -84,29 +84,57 @@ def bounded_claim_evidence_check(
     context: str = "",
     max_results: int = 3,
     allowed_source_routes: list[str] | None = None,
+    require_source_route_restrictions: bool = False,
 ) -> dict[str, object]:
     """Run one bounded source check without promoting a citation.
 
     The result deliberately separates identity, relevance, and support. A
     returned candidate is evidence for review, never an accepted citation.
-    ``allowed_source_routes`` is recorded as caller policy context; providers
-    that cannot enforce route restrictions must report that limitation.
+    ``allowed_source_routes`` is recorded as advisory caller policy context by
+    default. This verifier cannot enforce route restrictions. When the caller
+    marks those restrictions as required, the check returns an unsupported
+    policy result before constructing or calling a verifier.
     """
 
     if not claim.strip():
         raise ValueError("claim is required")
     if max_results < 1 or max_results > 5:
         raise ValueError("max_results must be between 1 and 5")
+    requested_routes = list(allowed_source_routes or [])
+    if require_source_route_restrictions and requested_routes:
+        return {
+            "schema_version": "citegeist.bounded_evidence_check.v1",
+            "claim": claim,
+            "status": "unsupported_policy",
+            "max_results": max_results,
+            "source_routes": requested_routes,
+            "source_routes_enforced": False,
+            "policy": {
+                "status": "unsupported",
+                "required": True,
+                "reason": "This verifier cannot enforce mandatory source-route restrictions.",
+            },
+            "candidates": [],
+            "limitations": [
+                "No retrieval was performed because mandatory source-route restrictions cannot be enforced."
+            ],
+        }
     verifier = verifier or BibliographyVerifier()
     result = verifier.verify_string(claim, context=context, limit=max_results)
     candidates = [result.entry, *[match.entry for match in result.alternates[: max_results - 1]]]
     scores = [result.match_score, *[match.score for match in result.alternates[: max_results - 1]]]
     sources = [result.source_label, *[match.source_label for match in result.alternates[: max_results - 1]]]
+    resolver_backed = (
+        result.status in {"exact", "high_confidence", "ambiguous"}
+        and bool(result.source_label.strip())
+        and result.source_label.strip().lower() != "none"
+    )
     records: list[dict[str, object]] = []
     for entry, score, source in zip(candidates, scores, sources):
         title = str(entry.fields.get("title") or "").strip()
         if not title:
             continue
+        candidate_resolver_backed = resolver_backed and source.strip().lower() != "none"
         records.append(
             {
                 "citation_key": entry.citation_key,
@@ -114,9 +142,10 @@ def bounded_claim_evidence_check(
                 "doi": str(entry.fields.get("doi") or ""),
                 "source_label": source,
                 "score": round(float(score), 4),
-                "source_identity": "resolved" if entry.citation_key or title else "unresolved",
-                "topical_relevance": "candidate" if float(score) > 0 else "unresolved",
-                "claim_support": "candidate_support" if float(score) >= 0.5 else "unresolved",
+                "source_identity": "resolved" if candidate_resolver_backed else "unresolved",
+                "topical_relevance": "lexical_candidate" if float(score) > 0 else "unassessed",
+                "lexical_match_score": round(float(score), 4),
+                "claim_support": "unassessed",
                 "promotion": "never_automatic",
             }
         )
@@ -128,8 +157,12 @@ def bounded_claim_evidence_check(
         "claim": claim,
         "status": status if status in {"accepted", "rejected", "unresolved", "negative"} else "unresolved",
         "max_results": max_results,
-        "source_routes": list(allowed_source_routes or []),
+        "source_routes": requested_routes,
         "source_routes_enforced": False,
+        "policy": {
+            "status": "advisory" if requested_routes else "unrestricted",
+            "required": False,
+        },
         "candidates": records,
         "limitations": [
             "Bibliographic identity and topical relevance do not establish claim support.",
