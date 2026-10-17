@@ -17,6 +17,7 @@ This documentation therefore emphasizes:
 
 ### Planning and Status
 - **[discovery-research-and-improvement-roadmap.md](./discovery-research-and-improvement-roadmap.md)** - operational discovery capabilities, research experiments, adoption criteria, and bounded agent self-improvement
+- **[next-discovery-improvement-roadmap.md](./next-discovery-improvement-roadmap.md)** - implementation stages from recorded candidate pools through reviewed validation and pilot
 - **[AGENTIC_OS.md](./AGENTIC_OS.md)** - roles, review boundaries, and operating rules for bounded ranking experiments
 - **[ranking-experiment-protocol.md](./ranking-experiment-protocol.md)** - JSON-only agent proposals, bounded offline evaluation, and promotion gates
 - **[process-improvement-roadmap.md](./process-improvement-roadmap.md)** - verification correctness, model provenance, evaluation, and recoverable-work priorities

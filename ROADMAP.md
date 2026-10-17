@@ -3,7 +3,12 @@
 The [discovery and improvement roadmap](docs/discovery-research-and-improvement-roadmap.md)
 sets out the next operational capabilities, a staged research programme, and
 evidence-based adoption rules for bounded agent self-improvement. It builds on
-the existing source and process plans; its work packages remain proposed.
+the existing source and process plans; C5a is implemented and later evaluation
+gates remain open.
+
+The [next discovery improvement roadmap](docs/next-discovery-improvement-roadmap.md)
+turns the C5a development runner into a staged plan for candidate-pool recording,
+human relevance labels, controlled validation, and a one-shot holdout decision.
 
 The proposed [lede-brief scholarly integration](docs/lede-brief-integration-roadmap.md)
 adds a consumer profile for the shared transformation library while retaining
