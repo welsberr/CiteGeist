@@ -57,6 +57,15 @@ def build_parser() -> argparse.ArgumentParser:
     research_parser.add_argument("--limit", type=int, default=10, help="Maximum candidates per source")
     research_parser.add_argument("--topic", help="Optional local topic slug filter")
 
+    experiment_parser = subparsers.add_parser(
+        "experiment-rank",
+        help="Compare bounded JSON ranking proposals on a recorded development pool",
+    )
+    experiment_parser.add_argument("--development", required=True, help="Recorded development pool JSON; no validation or holdout data")
+    experiment_parser.add_argument("--proposals", required=True, help="JSON-only allowlisted weight configurations")
+    experiment_parser.add_argument("--output", required=True, help="New private JSON receipt path; existing files are never overwritten")
+    experiment_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
+
     ingest_parser = subparsers.add_parser("ingest", help="Ingest BibTeX into the database")
     ingest_parser.add_argument("input", help="BibTeX file to ingest")
     ingest_parser.add_argument("--status", default="draft", help="Initial review status")
@@ -815,6 +824,25 @@ def main(argv: list[str] | None = None) -> int:
         except (ValueError, RuntimeError, OSError) as exc:
             print(str(exc), file=sys.stderr)
             return 1
+        return 0
+    if args.command == "experiment-rank":
+        from .ranking_experiment import RankingExperimentError, run_paths
+        try:
+            receipt = run_paths(
+                Path(args.development),
+                Path(args.proposals),
+                Path(args.output),
+                k=args.k,
+            )
+        except (RankingExperimentError, OSError) as exc:
+            print(f"Ranking experiment error: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({
+            "receipt": args.output,
+            "recommendation": receipt["selection"]["recommendation"],
+            "finalist": receipt["selection"]["development_finalist_id"],
+            "automatic_promotion": False,
+        }, indent=2))
         return 0
     if args.command == "research":
         try:

@@ -1,6 +1,6 @@
 # CiteGeist discovery and improvement roadmap
 
-Status: proposed implementation and research programme.
+Status: staged implementation; C5a development runner implemented, later validation gates remain proposed.
 Prepared: 17 October 2026.
 Audience: CiteGeist maintainer, implementing agents, and research reviewers.
 
@@ -74,10 +74,11 @@ gated by outcomes rather than calendar estimates.
 ### C0 Establish a reproducible baseline
 
 Create a small, versioned research-question set and a run receipt before changing
-ranking. Capture revision plus working-tree diff hash, database identity and snapshot,
+ranking. The current `eval_baseline` scorer and synthetic fixtures provide receipt
+plumbing only; they are not a human-reviewed relevance baseline. A research run
+should capture revision plus working-tree diff hash, database identity and snapshot,
 query, filters, provider requests, candidate identities, timings, errors, and result
 ordering. Record model, prompt, schema, and inference settings when applicable.
-Existing uncommitted changes must be represented in the baseline, not silently lost.
 
 Expose empty corpus, no matches, unknown topic, partial retrieval, and provider
 failure as separate outcomes. Add a read-only capability report for configured
@@ -170,15 +171,31 @@ does not stop unrelated eligible work, and the overall result remains honestly p
 
 ### C5 Establish an isolated experiment runner
 
-Use read-only benchmark snapshots and disposable output locations. Register candidate
-configuration, lineage, allowed changes, budget, evaluation version, and stop rules.
-Separate development feedback from locked evaluation labels. Preserve unsuccessful
-trials as well as winners. Provide a comparison report and an adoption/rollback record.
+**C5a — bounded development proposals (implemented).** `citegeist experiment-rank`
+accepts a fixed recorded candidate pool and at most 16 JSON ranking configurations.
+Only allowlisted numeric weights are interpreted; proposals cannot supply candidate
+IDs, executable code, evaluators, or labels. The runner uses no network or database,
+records input hashes and repository revision, caps cases and candidates, preserves
+all tried configurations in its receipt, and never promotes a result. Development
+results are for generating hypotheses only. The command is not an OS-level sandbox;
+use non-sensitive pools and a private output directory.
 
-Acceptance: a second run can reconstruct the comparison from retained artifacts;
-candidate code cannot write benchmark labels, the evaluator, or production data.
-An exceeded budget stops the run with an incomplete outcome. Failure injection
-demonstrates that interruption cannot promote a candidate.
+**C5b — controlled validation (next).** Create a separate reviewed validation pool
+and a maintainer-operated comparison that evaluates one preselected finalist against
+the baseline. Do not return per-case validation failures to the proposal agent or
+allow it to revise candidates against the same validation labels. Record uncertainty,
+cost, coverage, and critical invariant checks.
+
+**C5c — sealed holdout and decision record (later).** Run a one-shot release check
+under maintainer control against a separately held set. Validate every returned ID
+against the immutable candidate pool and report gated aggregate results. Preserve the
+previous configuration, pilot scope, monitoring window, and rollback reference.
+
+Acceptance for C5a: a second development run reconstructs the same scores from the
+same pool/configuration bytes; arbitrary IDs, executable proposal fields, malformed
+weights, oversized inputs, and output overwrite are rejected. Validation and locked
+holdout inputs are not accepted by the development command. Promotion remains a
+separate human decision.
 
 ### Delivery order
 
@@ -187,8 +204,10 @@ demonstrates that interruption cannot promote a candidate.
 2. C1 and C2 deliver the first useful discovery-and-review release.
 3. C4 supplies recovery before unattended or substantial enrichment work; C3 can
    begin with a small, manually initiated corpus pilot.
-4. C5 supports controlled comparisons as components become available. Agent-generated
-   optimization starts only after isolation and evaluation controls pass.
+4. C5a supports controlled development proposals. R7 remains restricted to
+   configuration-only proposals on recorded pools; validation and locked-holdout
+   controls must pass before claiming generalization. Executable code, prompt, or
+   model-weight self-modification is outside this roadmap's current authority.
 
 Retain SQLite and BibTeX. Defer a database replacement, large vector service,
 autonomous code evolution, and model fine-tuning until a measured bottleneck justifies
@@ -232,12 +251,13 @@ identity, support, or a production change.
 | R4 Semantic retrieval | Semantic candidates or reranking recover relevant works missed by lexical search. Compare lexical-only, semantic-only, and hybrid on fixed snapshots. | Adopt local or external semantic components only for demonstrated quality/cost benefits; record external query exposure and reproducibility limits. |
 | R5 Iterative discovery | Bounded citation expansion and query reformulation improve coverage beyond a single search. Match total calls and elapsed budgets. | Determine useful depth, stopping rules, and whether agent planning adds value beyond scripted iteration. |
 | R6 Feedback | Reviewed session feedback improves later related tasks without suppressing new perspectives. Use chronological splits and opt-in session data. | Establish scope and expiry for preferences; avoid treating clicks or acceptance as universal truth. |
-| R7 Agent-proposed optimization | Trace-informed prompt/configuration proposals outperform manual tuning or simple parameter search under equal total budgets. | Decide whether automated optimization earns its added complexity. Code mutation is a later, separate experiment. |
+| R7 Agent-proposed ranking configuration | Agent-proposed allowlisted ranking weights improve fixed-pool development results over the baseline and manual proposals under equal trial budgets. | C5a tests proposal plumbing only; C5b/C5c decide whether a candidate generalizes and merits an opt-in pilot. No executable code, prompt, or model-weight mutation. |
 
 R1 and R2 follow C0–C2. R3 follows C3; R4 can begin on abstracts without full text.
-R5 requires C4. R6 requires accumulated reviewed sessions. R7 requires C5 and stable
-evaluation. Change one major factor at a time; subsequently test interactions and
-remove components to establish which ones caused a benefit.
+R5 requires C4. R6 requires accumulated reviewed sessions. R7's development stage
+requires C5a; any adoption claim requires C5b/C5c and human-reviewed labels. Change
+one major factor at a time; subsequently test interactions and remove components to
+establish which ones caused a benefit.
 
 ### Measurements and run protocol
 
@@ -373,14 +393,15 @@ only local, task-relevant evaluation can justify CiteGeist adoption.
 
 ## First implementation handoff
 
-The working tree now contains C0's recorded-run scorer, C1's read-only brief/report,
-a seed-content ranking slice, and C4's initial batch receipts. These are not yet
-qualified against retrieval outcomes. Next work should freeze human-reviewed
-benchmark labels, test failure and resume behavior, improve source-failure visibility,
-and build a reviewable candidate workflow. Keep the GroundRecall pilot separately
-gated. No model self-modification, training, or persistent memory mutation is part of
-this handoff. Each handoff should identify changed files, checks performed, evidence
-location, unresolved issues, and the next decision it enables.
+The repository contains C0 receipt plumbing, a minimal C1 read-only brief/report,
+a seed-content ranking slice, C4 initial batch receipts, and now C5a's bounded
+configuration experiment runner. The current synthetic benchmark is not empirical
+relevance evidence. Next, create manually reviewed development pools and separately
+controlled validation labels, exercise rejection/budget cases, and improve provider
+failure visibility. Keep the GroundRecall pilot separately gated. No executable
+code self-modification, model training, automatic promotion, or persistent memory
+mutation is part of this handoff. Each handoff should identify changed files, checks
+performed, evidence location, unresolved issues, and the next decision it enables.
 
 Before launching any experiment, fill in this compact record:
 

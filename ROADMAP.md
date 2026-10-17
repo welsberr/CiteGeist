@@ -27,9 +27,11 @@ An initial offline recorded-run scorer is available as
 not retrieval quality. `citegeist research` now offers a read-only brief/report
 contract over selected current adapters. Topic ranking uses seed bibliographic
 content, and `bootstrap-batch --receipt PATH` can atomically checkpoint jobs for
-`--resume`. These are early implementation slices; human-reviewed benchmark labels,
-integration tests, and full source-failure visibility are still required before
-quality or reliability claims.
+`--resume`. `citegeist experiment-rank` now compares JSON-only ranking proposals on
+fixed development pools, without database writes, network calls, or automatic
+promotion. These are early implementation slices; human-reviewed benchmark labels,
+separate validation/holdout controls, integration tests, and full source-failure
+visibility are still required before quality or reliability claims.
 
 The first objective is not to support every metadata source. The first objective is to make one end-to-end path work reliably:
 

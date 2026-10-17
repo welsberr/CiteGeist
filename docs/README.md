@@ -17,6 +17,8 @@ This documentation therefore emphasizes:
 
 ### Planning and Status
 - **[discovery-research-and-improvement-roadmap.md](./discovery-research-and-improvement-roadmap.md)** - operational discovery capabilities, research experiments, adoption criteria, and bounded agent self-improvement
+- **[AGENTIC_OS.md](./AGENTIC_OS.md)** - roles, review boundaries, and operating rules for bounded ranking experiments
+- **[ranking-experiment-protocol.md](./ranking-experiment-protocol.md)** - JSON-only agent proposals, bounded offline evaluation, and promotion gates
 - **[process-improvement-roadmap.md](./process-improvement-roadmap.md)** - verification correctness, model provenance, evaluation, and recoverable-work priorities
 - **[lede-brief-integration-roadmap.md](./lede-brief-integration-roadmap.md)** - gated optional scholarly brief integration
 - **[groundrecall-unified-retrieval-integration-plan.md](./groundrecall-unified-retrieval-integration-plan.md)** - separately gated cross-repository retrieval pilot
@@ -81,6 +83,11 @@ those cases are marked inconclusive rather than as confirmed no-match results.
 material. `citegeist research` returns a read-only candidate JSON report from the
 local corpus and explicitly selected scholarly adapters; neither command verifies
 whether a result supports a particular claim.
+
+The bounded `citegeist experiment-rank` development loop compares JSON-only
+ranking weights against a fixed recorded candidate pool. It does not use validation
+or holdout labels. See the [experiment protocol](./ranking-experiment-protocol.md)
+before preparing a pool or proposal file.
 
 ```python
 from citegeist.sources import (
