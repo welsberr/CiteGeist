@@ -56,6 +56,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     research_parser.add_argument("--limit", type=int, default=10, help="Maximum candidates per source")
     research_parser.add_argument("--topic", help="Optional local topic slug filter")
+    research_parser.add_argument("--record-pool", help="Write a new private, unlabelled candidate-pool JSON artifact")
+
+    template_parser = subparsers.add_parser(
+        "label-template",
+        help="Create a private judgment template bound to exact candidate-pool bytes",
+    )
+    template_parser.add_argument("--pool", required=True, help="Recorded unlabelled candidate pool")
+    template_parser.add_argument("--output", required=True, help="New private judgment JSON path")
+
+    prepare_parser = subparsers.add_parser(
+        "prepare-rank-pool",
+        help="Join complete human judgments to a fixed pool for development ranking experiments",
+    )
+    prepare_parser.add_argument("--pool", required=True, help="Recorded unlabelled candidate pool")
+    prepare_parser.add_argument("--judgments", required=True, help="Completed judgment JSON from label-template")
+    prepare_parser.add_argument("--output", required=True, help="New private development pool JSON path")
 
     experiment_parser = subparsers.add_parser(
         "experiment-rank",
@@ -844,6 +860,20 @@ def main(argv: list[str] | None = None) -> int:
             "automatic_promotion": False,
         }, indent=2))
         return 0
+    if args.command in {"label-template", "prepare-rank-pool"}:
+        from .discovery_pool import DiscoveryPoolError, build_judgment_template, prepare_rank_pool, write_private_json
+        try:
+            value = (
+                build_judgment_template(Path(args.pool))
+                if args.command == "label-template"
+                else prepare_rank_pool(Path(args.pool), Path(args.judgments))
+            )
+            write_private_json(Path(args.output), value)
+        except (DiscoveryPoolError, OSError) as exc:
+            print(f"Discovery pool error: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({"output": args.output, "private": True, "automatic_promotion": False}, indent=2))
+        return 0
     if args.command == "research":
         try:
             brief = ResearchBrief(
@@ -860,12 +890,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "confidence-restore":
         return _run_confidence_restore(Path(args.db), Path(args.backup), Path(args.report))
 
-    store = BibliographyStore(args.db)
+    if args.command == "research":
+        database_path = Path(args.db)
+        store = BibliographyStore(args.db, read_only=True) if database_path.exists() else BibliographyStore(":memory:")
+    else:
+        store = BibliographyStore(args.db)
     try:
         if args.command == "ingest":
             return _run_ingest(store, Path(args.input), args.status, args.source_label)
         if args.command == "research":
             report = discover_references(brief, store=store)
+            if args.record_pool:
+                from .discovery_pool import DiscoveryPoolError, build_candidate_pool, write_private_json
+                try:
+                    write_private_json(Path(args.record_pool), build_candidate_pool(report))
+                except (DiscoveryPoolError, OSError) as exc:
+                    print(f"Discovery pool error: {exc}", file=sys.stderr)
+                    return 2
             print(json.dumps(asdict(report), indent=2, ensure_ascii=False))
             return 0
         if args.command == "search":

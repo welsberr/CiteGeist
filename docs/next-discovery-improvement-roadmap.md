@@ -1,6 +1,6 @@
 # Next roadmap: evidence-ready discovery and ranking
 
-Status: proposed next-stage implementation plan.
+Status: implementation in progress; N1 recording and the first N2 label-join path are implemented.
 Prepared: 17 October 2026.
 Audience: CiteGeist maintainers, researchers, and bounded ranking-proposal agents.
 
@@ -24,6 +24,11 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
   database calls, and cannot promote a configuration.
 - The checked-in benchmark is synthetic plumbing data. There is no human-reviewed
   candidate pool, controlled validation set, or sealed holdout evidence yet.
+- `citegeist research --record-pool` now writes a private, unlabelled discovery
+  artifact. `label-template` and `prepare-rank-pool` bind complete binary
+  relevance judgments to its exact bytes. The current workflow handles one
+  recorded query per pool; task-set assembly, split design, and a reviewed rubric
+  remain open work.
 - The experiment ranker is separate from CiteGeist's production ranking. A proposal
   result cannot change ordinary search behavior.
 
@@ -88,13 +93,25 @@ privately, and reused by `experiment-rank` after label preparation.
 **Exit condition:** replaying a recorded pool yields the same candidate IDs and
 provider order; malformed, duplicate, or provenance-free records fail visibly.
 
+**Implementation note:** the first recorder is available as `research
+--record-pool`. It preserves provider order/ranks and `unknown` outcomes, omits raw
+provider error text and URLs, flags conflicting metadata, writes owner-readable
+artifacts without overwriting, and opens an existing SQLite corpus read-only.
+Candidate pool IDs are deterministic over request, outcomes, and inventory;
+retrieval run IDs also include the timestamp. A local-corpus snapshot fingerprint
+and multi-query pool assembler remain outstanding before N1 can be considered
+complete.
+
 ### N2 — Prepare labels and development experiments
 
 Build a small local review workflow or structured annotation file for decisions such
 as relevant, background, wrong topic, wrong edition/version, duplicate, inaccessible,
 and unjudged. Keep reviewer identity and notes private. Maintain a separate label
 artifact so candidate records can be regenerated without silently replacing
-judgments.
+judgments. The initial `label-template` / `prepare-rank-pool` implementation supports
+binary relevant, not-relevant, and unjudged decisions only; unjudged blocks export.
+The richer rubric, task-set assembly, reviewer disagreement handling, and graded
+judgments are still required.
 
 Create the development pool by joining reviewed labels to its fixed candidate pool.
 Run `citegeist experiment-rank` with a declared baseline and a small set of

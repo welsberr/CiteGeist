@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from citegeist import (
     AssessmentMethodRef,
     BibliographyStore,
@@ -64,6 +66,29 @@ def test_store_ingests_entries_relations_and_search_text():
         ]
     finally:
         store.close()
+
+
+def test_store_read_only_opens_existing_database_without_schema_changes(tmp_path):
+    path = tmp_path / "library.sqlite3"
+    writable = BibliographyStore(path)
+    writable.ingest_bibtex(SAMPLE_BIB)
+    before = sqlite3.connect(path).execute(
+        "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+    ).fetchall()
+    writable.close()
+
+    readonly = BibliographyStore(path, read_only=True)
+    try:
+        assert readonly.search_text("citation graphs")
+        assert readonly.database_summary()["entries"] == 2
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            readonly.connection.execute("CREATE TABLE must_not_be_created (id INTEGER)")
+    finally:
+        readonly.close()
+    after = sqlite3.connect(path).execute(
+        "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"
+    ).fetchall()
+    assert after == before
 
 
 def test_store_search_text_treats_punctuation_as_literal_text():

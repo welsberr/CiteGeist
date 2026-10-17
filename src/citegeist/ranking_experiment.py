@@ -84,6 +84,7 @@ def _validate_pool(pool: Any, label: str) -> dict[str, Any]:
             ranks = candidate.get("provider_ranks", {})
             _require(isinstance(ranks, dict), f"{label}/{case_id}: provider_ranks must be an object")
             _require(all(isinstance(p, str) and isinstance(rank, int) and not isinstance(rank, bool) and rank >= 1 for p, rank in ranks.items()), f"{label}/{case_id}: provider ranks must be positive integers")
+        _require(set(relevant).issubset(candidate_ids), f"{label}/{case_id}: relevant_ids must belong to the fixed candidate set")
     return pool
 
 

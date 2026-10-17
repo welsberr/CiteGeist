@@ -82,6 +82,7 @@ class DiscoveryResult:
     entry: BibEntry
     providers: list[str] = field(default_factory=list)
     provider_ranks: dict[str, int] = field(default_factory=dict)
+    field_conflicts: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -207,6 +208,14 @@ def _record_results(
         if result is None:
             result = DiscoveryResult(entry=entry)
             merged[identity] = result
+        else:
+            for field_name in set(result.entry.fields) & set(entry.fields):
+                existing_value = str(result.entry.fields.get(field_name) or "").strip()
+                incoming_value = str(entry.fields.get(field_name) or "").strip()
+                if existing_value and incoming_value and existing_value.casefold() != incoming_value.casefold():
+                    variants = result.field_conflicts.setdefault(field_name, {})
+                    variants.setdefault(result.providers[0] if result.providers else provider, existing_value)
+                    variants[provider] = incoming_value
         if provider not in result.providers:
             result.providers.append(provider)
         result.provider_ranks[provider] = rank

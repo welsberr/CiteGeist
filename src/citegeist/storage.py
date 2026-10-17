@@ -69,13 +69,19 @@ CORE_ENTRY_FIELDS = {
 
 
 class BibliographyStore:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(self, path: str | Path = ":memory:", *, read_only: bool = False) -> None:
         self.path = str(path)
-        self.connection = sqlite3.connect(self.path)
+        self.read_only = read_only
+        if read_only and self.path != ":memory:":
+            database_uri = f"{Path(self.path).resolve().as_uri()}?mode=ro"
+            self.connection = sqlite3.connect(database_uri, uri=True)
+        else:
+            self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self._fts5_enabled = self._detect_fts5()
-        self.initialize()
+        if not read_only:
+            self.initialize()
 
     def close(self) -> None:
         self.connection.close()
@@ -106,7 +112,7 @@ class BibliographyStore:
             ).fetchone()[0]
         ) if self._fts5_enabled and fts_schema_compatible else 0
         fts_integrity_error = None
-        if self._fts5_enabled:
+        if self._fts5_enabled and not self.read_only:
             try:
                 self.connection.execute("INSERT INTO entry_text_fts(entry_text_fts) VALUES('integrity-check')")
             except sqlite3.DatabaseError as exc:

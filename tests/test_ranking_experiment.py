@@ -132,6 +132,17 @@ def test_development_pool_ids_must_be_unique():
         )
 
 
+def test_relevant_ids_must_belong_to_fixed_candidate_set():
+    pool = _pool()
+    pool["cases"][0]["relevant_ids"] = ["not-in-pool"]
+    proposals = _proposals()
+    with pytest.raises(RankingExperimentError, match="fixed candidate set"):
+        run_ranking_experiment(
+            pool, proposals, development_bytes=b"pool", proposal_bytes=b"proposal",
+            repo=Path.cwd(), k=1,
+        )
+
+
 def test_cli_writes_private_receipt_from_json_proposals(tmp_path, capsys):
     development = tmp_path / "development.json"
     proposals = tmp_path / "proposals.json"

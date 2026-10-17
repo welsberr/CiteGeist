@@ -88,7 +88,8 @@ whether a result supports a particular claim.
 The bounded `citegeist experiment-rank` development loop compares JSON-only
 ranking weights against a fixed recorded candidate pool. It does not use validation
 or holdout labels. See the [experiment protocol](./ranking-experiment-protocol.md)
-before preparing a pool or proposal file.
+before preparing a pool or proposal file. To record `research` output and prepare
+human-reviewed development labels, follow the [discovery-pool protocol](./discovery-pool-protocol.md).
 
 ```python
 from citegeist.sources import (
