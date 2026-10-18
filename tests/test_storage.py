@@ -91,6 +91,20 @@ def test_store_read_only_opens_existing_database_without_schema_changes(tmp_path
     assert after == before
 
 
+def test_corpus_snapshot_fingerprint_is_stable_and_tracks_content(tmp_path):
+    first = BibliographyStore(tmp_path / "first.sqlite3")
+    second = BibliographyStore(tmp_path / "second.sqlite3")
+    try:
+        first.ingest_bibtex(SAMPLE_BIB)
+        second.ingest_bibtex(SAMPLE_BIB)
+        assert first.corpus_snapshot_fingerprint() == second.corpus_snapshot_fingerprint()
+        second.ingest_bibtex("@article{new2025, title={New discovery}, year={2025}}")
+        assert first.corpus_snapshot_fingerprint() != second.corpus_snapshot_fingerprint()
+    finally:
+        first.close()
+        second.close()
+
+
 def test_store_search_text_treats_punctuation_as_literal_text():
     store = BibliographyStore()
     try:

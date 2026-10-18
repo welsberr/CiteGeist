@@ -8,6 +8,7 @@ from citegeist.bibtex import BibEntry
 from citegeist.cli import main
 from citegeist.discovery_pool import (
     DiscoveryPoolError,
+    assemble_candidate_pools,
     build_candidate_pool,
     build_judgment_template,
     prepare_rank_pool,
@@ -69,58 +70,102 @@ def test_cross_provider_metadata_conflict_is_preserved_for_review():
     }
 
 
-def _write_pool(tmp_path):
-    pool = build_candidate_pool(_report())
+def test_pool_assembly_requires_exact_topic_family_split_assignments(tmp_path):
+    first_path = tmp_path / "first.json"
+    first_path.write_text(json.dumps(build_candidate_pool(_report())), encoding="utf-8")
+    second_report = _report()
+    second_report.brief = ResearchBrief("bird navigation methods", sources=("crossref", "openalex"), per_source_limit=5)
+    second_path = tmp_path / "second.json"
+    second_path.write_text(json.dumps(build_candidate_pool(second_report)), encoding="utf-8")
+    first_case = json.loads(first_path.read_text())["cases"][0]["case_id"]
+    second_case = json.loads(second_path.read_text())["cases"][0]["case_id"]
+    manifest_path = tmp_path / "splits.json"
+    manifest = {
+        "schema_version": 1,
+        "rubric_version": "research-relevance-v2",
+        "assignments": [
+            {"case_id": first_case, "split": "development", "topic_family": "navigation"},
+            {"case_id": second_case, "split": "holdout", "topic_family": "navigation"},
+        ],
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(DiscoveryPoolError, match="crosses data splits"):
+        assemble_candidate_pools([first_path, second_path], manifest_path)
+
+    manifest["assignments"][1]["topic_family"] = "bird migration"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assembled = assemble_candidate_pools([first_path, second_path], manifest_path)
+    assert {case["split"] for case in assembled["cases"]} == {"development", "holdout"}
+    assert len(assembled["source_pool_sha256s"]) == 2
+
+
+def _write_pool(tmp_path, *, split="development"):
+    raw_path = tmp_path / "raw-pool.json"
+    raw_path.write_text(json.dumps(build_candidate_pool(_report()), indent=2), encoding="utf-8")
+    raw_pool = json.loads(raw_path.read_text(encoding="utf-8"))
+    split_path = tmp_path / "split-manifest.json"
+    split_path.write_text(json.dumps({
+        "schema_version": 1,
+        "rubric_version": "research-relevance-v2",
+        "assignments": [{
+            "case_id": case["case_id"], "split": split, "topic_family": "marine acoustics",
+        } for case in raw_pool["cases"]],
+    }), encoding="utf-8")
     pool_path = tmp_path / "pool.json"
-    pool_path.write_text(json.dumps(pool, indent=2), encoding="utf-8")
+    pool_path.write_text(json.dumps(assemble_candidate_pools([raw_path], split_path), indent=2), encoding="utf-8")
     return pool_path
 
 
 def test_judgment_template_binds_exact_pool_bytes_and_requires_complete_labels(tmp_path):
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path)
+    template = build_judgment_template(pool_path, split="development")
     assert template["pool_sha256"]
-    assert template["rubric_version"] == "binary-relevance-v1"
+    assert template["rubric_version"] == "research-relevance-v2"
     judgments_path = tmp_path / "judgments.json"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     with pytest.raises(DiscoveryPoolError, match="every candidate"):
-        prepare_rank_pool(pool_path, judgments_path)
+        prepare_rank_pool(pool_path, judgments_path, split="development")
 
-    template["judgments"][0]["candidate_judgments"][0]["label"] = "relevant"
-    template["judgments"][0]["candidate_judgments"][1]["label"] = "not_relevant"
+    template["judgments"][0]["candidate_judgments"][0]["relevance"] = "useful"
+    template["judgments"][0]["candidate_judgments"][1]["relevance"] = "not_relevant"
+    template["judgments"][0]["candidate_judgments"][0]["identity_correct"] = "yes"
+    template["judgments"][0]["candidate_judgments"][0]["version_match"] = "yes"
+    template["judgments"][0]["candidate_judgments"][0]["source_authority"] = "strong"
+    template["judgments"][0]["candidate_judgments"][0]["evidence_support"] = "direct"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
-    development = prepare_rank_pool(pool_path, judgments_path)
+    development = prepare_rank_pool(pool_path, judgments_path, split="development")
     assert development["split"] == "development"
     assert development["cases"][0]["relevant_ids"] == ["doi:10.1234/abc.1"]
     assert development["cases"][0]["candidates"][0]["provider_ranks"] == {"crossref": 1, "openalex": 2}
+    assert development["cases"][0]["quality_judgments"]["doi:10.1234/abc.1"]["source_authority"] == "strong"
 
 
 def test_label_join_rejects_changed_bytes_unknown_ids_and_duplicate_labels(tmp_path):
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path)
+    template = build_judgment_template(pool_path, split="development")
     labels = template["judgments"][0]["candidate_judgments"]
-    labels[0]["label"] = labels[1]["label"] = "not_relevant"
+    labels[0]["relevance"] = labels[1]["relevance"] = "not_relevant"
     judgments_path = tmp_path / "judgments.json"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     with pool_path.open("a", encoding="utf-8") as stream:
         stream.write(" ")
     with pytest.raises(DiscoveryPoolError, match="exact candidate-pool bytes"):
-        prepare_rank_pool(pool_path, judgments_path)
+        prepare_rank_pool(pool_path, judgments_path, split="development")
 
     pool_path.unlink()
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path)
+    template = build_judgment_template(pool_path, split="development")
     labels = template["judgments"][0]["candidate_judgments"]
-    labels[0]["label"] = labels[1]["label"] = "not_relevant"
+    labels[0]["relevance"] = labels[1]["relevance"] = "not_relevant"
     labels[1]["candidate_id"] = labels[0]["candidate_id"]
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     with pytest.raises(DiscoveryPoolError, match="duplicate label"):
-        prepare_rank_pool(pool_path, judgments_path)
+        prepare_rank_pool(pool_path, judgments_path, split="development")
 
     labels[1]["candidate_id"] = "made-up:id"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     with pytest.raises(DiscoveryPoolError, match="label IDs do not match"):
-        prepare_rank_pool(pool_path, judgments_path)
+        prepare_rank_pool(pool_path, judgments_path, split="development")
 
 
 def test_private_writer_refuses_overwrite_and_uses_owner_only_permissions(tmp_path):
@@ -136,12 +181,12 @@ def test_cli_creates_label_template_and_private_development_pool(tmp_path, capsy
     pool_path = _write_pool(tmp_path)
     judgments_path = tmp_path / "judgments.json"
     dev_path = tmp_path / "dev.json"
-    assert main(["label-template", "--pool", str(pool_path), "--output", str(judgments_path)]) == 0
+    assert main(["label-template", "--pool", str(pool_path), "--split", "development", "--output", str(judgments_path)]) == 0
     template = json.loads(judgments_path.read_text(encoding="utf-8"))
     for item in template["judgments"][0]["candidate_judgments"]:
-        item["label"] = "not_relevant"
+        item["relevance"] = "not_relevant"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
-    assert main(["prepare-rank-pool", "--pool", str(pool_path), "--judgments", str(judgments_path), "--output", str(dev_path)]) == 0
+    assert main(["prepare-rank-pool", "--pool", str(pool_path), "--judgments", str(judgments_path), "--split", "development", "--output", str(dev_path)]) == 0
     assert json.loads(dev_path.read_text(encoding="utf-8"))["split"] == "development"
     assert capsys.readouterr().out.count('"automatic_promotion": false') == 2
 
@@ -162,4 +207,6 @@ def test_research_cli_records_pool_without_changing_sqlite(tmp_path, capsys):
     capsys.readouterr()
     pool = json.loads(pool_path.read_text(encoding="utf-8"))
     assert pool["cases"][0]["candidates"][0]["id"] == "doi:10.1234/ocean.1"
+    assert pool["local_corpus_snapshot"]["entry_count"] == 1
+    assert pool["local_corpus_snapshot"]["sha256"]
     assert hashlib.sha256(database.read_bytes()).hexdigest() == before

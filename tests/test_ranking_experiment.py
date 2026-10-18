@@ -143,6 +143,18 @@ def test_relevant_ids_must_belong_to_fixed_candidate_set():
         )
 
 
+def test_experiment_runner_refuses_validation_and_holdout_splits():
+    proposals = _proposals()
+    for split in ("validation", "holdout"):
+        pool = _pool(split)
+        pool["split"] = split
+        with pytest.raises(RankingExperimentError, match="development pools only"):
+            run_ranking_experiment(
+                pool, proposals, development_bytes=b"pool", proposal_bytes=b"proposal",
+                repo=Path.cwd(), k=1,
+            )
+
+
 def test_cli_writes_private_receipt_from_json_proposals(tmp_path, capsys):
     development = tmp_path / "development.json"
     proposals = tmp_path / "proposals.json"

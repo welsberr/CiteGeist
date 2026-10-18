@@ -58,20 +58,30 @@ def build_parser() -> argparse.ArgumentParser:
     research_parser.add_argument("--topic", help="Optional local topic slug filter")
     research_parser.add_argument("--record-pool", help="Write a new private, unlabelled candidate-pool JSON artifact")
 
+    assemble_parser = subparsers.add_parser(
+        "assemble-pool",
+        help="Combine recorded searches and assign leakage-aware data splits before labeling",
+    )
+    assemble_parser.add_argument("--pool", action="append", required=True, help="Unlabelled candidate pool JSON; repeat per search")
+    assemble_parser.add_argument("--splits", required=True, help="Reviewed split-manifest JSON assigning every case and topic family")
+    assemble_parser.add_argument("--output", required=True, help="New private assembled task-set JSON path")
+
     template_parser = subparsers.add_parser(
         "label-template",
         help="Create a private judgment template bound to exact candidate-pool bytes",
     )
     template_parser.add_argument("--pool", required=True, help="Recorded unlabelled candidate pool")
+    template_parser.add_argument("--split", choices=("development", "validation", "holdout"), required=True)
     template_parser.add_argument("--output", required=True, help="New private judgment JSON path")
 
     prepare_parser = subparsers.add_parser(
         "prepare-rank-pool",
-        help="Join complete human judgments to a fixed pool for development ranking experiments",
+        help="Join complete human judgments to a fixed pool for one assigned data split",
     )
     prepare_parser.add_argument("--pool", required=True, help="Recorded unlabelled candidate pool")
     prepare_parser.add_argument("--judgments", required=True, help="Completed judgment JSON from label-template")
-    prepare_parser.add_argument("--output", required=True, help="New private development pool JSON path")
+    prepare_parser.add_argument("--split", choices=("development", "validation", "holdout"), required=True)
+    prepare_parser.add_argument("--output", required=True, help="New private split-labeled ranking pool JSON path")
 
     experiment_parser = subparsers.add_parser(
         "experiment-rank",
@@ -81,6 +91,24 @@ def build_parser() -> argparse.ArgumentParser:
     experiment_parser.add_argument("--proposals", required=True, help="JSON-only allowlisted weight configurations")
     experiment_parser.add_argument("--output", required=True, help="New private JSON receipt path; existing files are never overwritten")
     experiment_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
+
+    register_parser = subparsers.add_parser(
+        "register-validation",
+        help="Pre-register the development finalist and minimum useful effect before validation",
+    )
+    register_parser.add_argument("--development-receipt", required=True)
+    register_parser.add_argument("--validation-pool", required=True, help="Unlabelled assembled task set; register before reviewers receive labels")
+    register_parser.add_argument("--minimum-precision-gain", type=float, required=True, help="Predeclared minimum mean precision@k improvement [0,1]")
+    register_parser.add_argument("--output", required=True, help="New private registration artifact")
+
+    validation_parser = subparsers.add_parser(
+        "validate-rank",
+        help="Evaluate one pre-registered finalist; refuses duplicate receipts for a task set in the same output directory",
+    )
+    validation_parser.add_argument("--validation", required=True, help="Private prepared validation pool")
+    validation_parser.add_argument("--registration", required=True, help="Pre-registration created before labels were opened")
+    validation_parser.add_argument("--output-dir", required=True, help="Private one-shot validation receipt directory")
+    validation_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
 
     ingest_parser = subparsers.add_parser("ingest", help="Ingest BibTeX into the database")
     ingest_parser.add_argument("input", help="BibTeX file to ingest")
@@ -860,14 +888,38 @@ def main(argv: list[str] | None = None) -> int:
             "automatic_promotion": False,
         }, indent=2))
         return 0
-    if args.command in {"label-template", "prepare-rank-pool"}:
-        from .discovery_pool import DiscoveryPoolError, build_judgment_template, prepare_rank_pool, write_private_json
+    if args.command in {"register-validation", "validate-rank"}:
+        from .validation_experiment import ValidationExperimentError, register_validation, run_validation_paths
+        from .discovery_pool import write_private_json
         try:
-            value = (
-                build_judgment_template(Path(args.pool))
-                if args.command == "label-template"
-                else prepare_rank_pool(Path(args.pool), Path(args.judgments))
-            )
+            if args.command == "register-validation":
+                registration = register_validation(
+                    Path(args.development_receipt),
+                    validation_pool_path=Path(args.validation_pool),
+                    minimum_precision_gain=args.minimum_precision_gain,
+                )
+                write_private_json(Path(args.output), registration)
+                output = Path(args.output)
+                decision = "registered"
+            else:
+                receipt, output = run_validation_paths(
+                    Path(args.validation), Path(args.registration), Path(args.output_dir), k=args.k,
+                )
+                decision = receipt["decision"]
+        except (ValidationExperimentError, OSError, ValueError) as exc:
+            print(f"Validation experiment error: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps({"receipt": str(output), "decision": decision, "automatic_promotion": False}, indent=2))
+        return 0
+    if args.command in {"assemble-pool", "label-template", "prepare-rank-pool"}:
+        from .discovery_pool import DiscoveryPoolError, assemble_candidate_pools, build_judgment_template, prepare_rank_pool, write_private_json
+        try:
+            if args.command == "assemble-pool":
+                value = assemble_candidate_pools([Path(item) for item in args.pool], Path(args.splits))
+            elif args.command == "label-template":
+                value = build_judgment_template(Path(args.pool), split=args.split)
+            else:
+                value = prepare_rank_pool(Path(args.pool), Path(args.judgments), split=args.split)
             write_private_json(Path(args.output), value)
         except (DiscoveryPoolError, OSError) as exc:
             print(f"Discovery pool error: {exc}", file=sys.stderr)
@@ -899,11 +951,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "ingest":
             return _run_ingest(store, Path(args.input), args.status, args.source_label)
         if args.command == "research":
+            local_snapshot = None
+            if args.record_pool and "local" in brief.sources:
+                store.connection.execute("BEGIN")
+                local_snapshot = store.corpus_snapshot_fingerprint()
             report = discover_references(brief, store=store)
             if args.record_pool:
                 from .discovery_pool import DiscoveryPoolError, build_candidate_pool, write_private_json
                 try:
-                    write_private_json(Path(args.record_pool), build_candidate_pool(report))
+                    write_private_json(
+                        Path(args.record_pool),
+                        build_candidate_pool(report, local_corpus_snapshot=local_snapshot),
+                    )
                 except (DiscoveryPoolError, OSError) as exc:
                     print(f"Discovery pool error: {exc}", file=sys.stderr)
                     return 2

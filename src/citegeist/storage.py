@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 from collections import deque
@@ -151,6 +152,24 @@ class BibliographyStore:
             "fts_orphan_rows": fts_orphan_count,
             "fts_integrity_error": fts_integrity_error,
         }
+
+    def corpus_snapshot_fingerprint(self) -> dict[str, object]:
+        """Return a path-independent content fingerprint for bibliographic records."""
+        fields = (
+            "citation_key", "entry_type", "title", "year", "journal", "booktitle",
+            "publisher", "abstract", "keywords", "doi", "isbn", "fulltext",
+            "extra_fields_json",
+        )
+        columns = ", ".join(f'"{field}"' for field in fields)
+        cursor = self.connection.execute(f"SELECT {columns} FROM entries ORDER BY citation_key")
+        digest = hashlib.sha256()
+        count = 0
+        for row in cursor:
+            encoded = json.dumps([row[field] for field in fields], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            count += 1
+        return {"entry_count": count, "sha256": digest.hexdigest()}
 
     def rebuild_search_index(self, backup_path: str | Path) -> dict[str, object]:
         """Back up and rebuild the standalone FTS5 index explicitly."""

@@ -53,6 +53,11 @@ def _validate_pool(pool: Any, label: str) -> dict[str, Any]:
     _require(isinstance(pool, dict), f"{label}: pool must be a JSON object")
     _require(pool.get("schema_version") == SCHEMA_VERSION, f"{label}: unsupported schema_version")
     _require(isinstance(pool.get("pool_id"), str) and pool["pool_id"], f"{label}: pool_id is required")
+    split = pool.get("split")
+    if label == "development":
+        _require(split in (None, "development"), "development runner accepts development pools only")
+    elif label in {"validation", "holdout"}:
+        _require(split == label, f"{label} evaluation requires a {label}-split pool")
     cases = pool.get("cases")
     _require(isinstance(cases, list) and cases, f"{label}: cases must be a nonempty list")
     _require(len(cases) <= MAX_CASES, f"{label}: case limit is {MAX_CASES}")

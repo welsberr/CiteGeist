@@ -1,6 +1,6 @@
 # Next roadmap: evidence-ready discovery and ranking
 
-Status: implementation in progress; N1 recording and the first N2 label-join path are implemented.
+Status: implementation in progress; the N1 data path, expanded N2 preparation, and aggregate-only N3 evaluator are implemented, with review and access-control work outstanding.
 Prepared: 17 October 2026.
 Audience: CiteGeist maintainers, researchers, and bounded ranking-proposal agents.
 
@@ -25,10 +25,14 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
 - The checked-in benchmark is synthetic plumbing data. There is no human-reviewed
   candidate pool, controlled validation set, or sealed holdout evidence yet.
 - `citegeist research --record-pool` now writes a private, unlabelled discovery
-  artifact. `label-template` and `prepare-rank-pool` bind complete binary
-  relevance judgments to its exact bytes. The current workflow handles one
-  recorded query per pool; task-set assembly, split design, and a reviewed rubric
-  remain open work.
+  artifact. `assemble-pool` combines searches after a topic-family split manifest;
+  `label-template` and `prepare-rank-pool` bind complete judgments to exact bytes.
+  The local SQLite snapshot receives a path-independent content fingerprint.
+- `register-validation` freezes one development finalist and a predeclared minimum
+  effect against the exact unlabelled candidate inventory. `validate-rank` checks
+  those bytes, evaluates once per task-set ID in a private output directory, and
+  returns aggregates only. External access isolation remains an operator
+  responsibility.
 - The experiment ranker is separate from CiteGeist's production ranking. A proposal
   result cannot change ordinary search behavior.
 
@@ -93,14 +97,15 @@ privately, and reused by `experiment-rank` after label preparation.
 **Exit condition:** replaying a recorded pool yields the same candidate IDs and
 provider order; malformed, duplicate, or provenance-free records fail visibly.
 
-**Implementation note:** the first recorder is available as `research
---record-pool`. It preserves provider order/ranks and `unknown` outcomes, omits raw
-provider error text and URLs, flags conflicting metadata, writes owner-readable
-artifacts without overwriting, and opens an existing SQLite corpus read-only.
-Candidate pool IDs are deterministic over request, outcomes, and inventory;
-retrieval run IDs also include the timestamp. A local-corpus snapshot fingerprint
-and multi-query pool assembler remain outstanding before N1 can be considered
-complete.
+**Implementation note:** `research --record-pool` preserves provider order/ranks
+and `unknown` outcomes, omits raw provider error text and URLs, flags conflicting
+metadata, writes owner-readable artifacts without overwriting, and opens an
+existing SQLite corpus read-only. Candidate pool IDs are deterministic over
+request, outcomes, available corpus fingerprint, and inventory; retrieval run IDs
+also include the timestamp. `assemble-pool` validates exact case assignments and
+rejects related-work families split across data partitions. N1's stable snapshot
+and assembly path is implemented; maintainers still need to curate and review the
+task inventory.
 
 ### N2 — Prepare labels and development experiments
 
@@ -108,10 +113,13 @@ Build a small local review workflow or structured annotation file for decisions 
 as relevant, background, wrong topic, wrong edition/version, duplicate, inaccessible,
 and unjudged. Keep reviewer identity and notes private. Maintain a separate label
 artifact so candidate records can be regenerated without silently replacing
-judgments. The initial `label-template` / `prepare-rank-pool` implementation supports
-binary relevant, not-relevant, and unjudged decisions only; unjudged blocks export.
-The richer rubric, task-set assembly, reviewer disagreement handling, and graded
-judgments are still required.
+judgments. `label-template` / `prepare-rank-pool` now record relevance separately
+from identity correctness, version match, source authority, and evidence support.
+The four relevance grades are not relevant, background, useful, and essential;
+useful/essential map to the binary development target, while validation reports
+graded nDCG. Other dimensions remain separate critical checks. Unjudged relevance
+blocks export. The reviewer instructions, double-review, and adjudication
+procedure still require human design and piloting.
 
 Create the development pool by joining reviewed labels to its fixed candidate pool.
 Run `citegeist experiment-rank` with a declared baseline and a small set of
@@ -149,6 +157,17 @@ locked evaluation gate.
 **Exit condition:** failure-injection and access tests show the proposal process
 cannot read validation labels, choose arbitrary candidate IDs, edit the evaluator,
 or rerun against the same validation set after seeing its result.
+
+**Implementation note:** `register-validation` captures the selected development
+finalist, baseline, exact unlabelled validation-pool hash and candidate inventory,
+and minimum useful precision gain. `validate-rank` accepts one registration and
+validation-split pool, verifies the fixed candidate inventory plus selected-result
+identity, version, graded relevance, and provenance, and emits aggregate-only
+results. It refuses a second receipt for the same task-set ID in the same output
+directory. This is not an OS-level isolation boundary: an agent with the same
+filesystem access can read labels or use another output directory.
+The controlled account/mount setup and access-failure tests remain prerequisites
+before N3 can pass its exit condition or be treated as confirmatory validation.
 
 ### N4 — One-shot holdout and opt-in pilot
 
