@@ -8,7 +8,9 @@ from citegeist.cli import main
 from citegeist.ranking_experiment import run_ranking_experiment
 from citegeist.validation_experiment import (
     ValidationExperimentError,
+    register_holdout,
     register_validation,
+    run_holdout_paths,
     run_validation_paths,
 )
 from test_discovery_pool import _write_pool
@@ -63,6 +65,22 @@ def _validation_pool(tmp_path):
     path = tmp_path / "validation.json"
     path.write_text(json.dumps(validation), encoding="utf-8")
     return assembled_path, path, validation["pool_id"]
+
+
+def _holdout_pool(tmp_path):
+    assembled_path = _write_pool(tmp_path, split="holdout")
+    template = build_judgment_template(assembled_path, split="holdout", reviewer_id="holdout-reviewer")
+    for case in template["judgments"]:
+        for candidate in case["candidate_judgments"]:
+            candidate["relevance"] = "essential" if candidate["candidate_id"].startswith("doi:") else "not_relevant"
+            candidate["identity_correct"] = "yes"
+            candidate["version_match"] = "yes"
+    labels_path = tmp_path / "holdout-labels.json"
+    labels_path.write_text(json.dumps(template), encoding="utf-8")
+    holdout = prepare_rank_pool(assembled_path, labels_path, split="holdout")
+    path = tmp_path / "holdout.json"
+    path.write_text(json.dumps(holdout), encoding="utf-8")
+    return assembled_path, path
 
 
 def test_registers_one_finalist_before_aggregate_only_validation(tmp_path):
@@ -194,3 +212,86 @@ def test_cli_registers_and_runs_one_shot_validation(tmp_path, capsys):
         "--registration", str(registration_path), "--output-dir", str(output_dir), "--k", "1",
     ]) == 2
     assert "already evaluated" in capsys.readouterr().err
+
+
+def test_one_shot_holdout_requires_passed_validation_and_freezes_tolerances(tmp_path, capsys):
+    development_receipt_path = _development_receipt(tmp_path)
+    validation_source, validation_path, _ = _validation_pool(tmp_path)
+    validation_registration = register_validation(
+        development_receipt_path,
+        validation_pool_path=validation_source,
+        minimum_precision_gain=0.0,
+    )
+    validation_registration_path = tmp_path / "validation-registration.json"
+    validation_registration_path.write_text(json.dumps(validation_registration), encoding="utf-8")
+    validation_receipt, _ = run_validation_paths(
+        validation_path, validation_registration_path, tmp_path / "validation-receipts", k=1,
+    )
+    validation_receipt_path = tmp_path / "validation-receipt.json"
+    validation_receipt_path.write_text(json.dumps(validation_receipt), encoding="utf-8")
+
+    holdout_source, holdout_path = _holdout_pool(tmp_path)
+    registration_path = tmp_path / "holdout-registration.json"
+    assert main([
+        "register-holdout", "--validation-receipt", str(validation_receipt_path),
+        "--validation-registration", str(validation_registration_path),
+        "--holdout-pool", str(holdout_source), "--minimum-precision-gain", "0",
+        "--maximum-recall-loss", "0", "--maximum-empty-relevance-regression", "0",
+        "--maximum-source-coverage-loss", "0", "--output", str(registration_path),
+    ]) == 0
+    capsys.readouterr()
+    output_dir = tmp_path / "holdout-receipts"
+    assert main([
+        "evaluate-holdout", "--holdout", str(holdout_path),
+        "--registration", str(registration_path), "--output-dir", str(output_dir), "--k", "1",
+    ]) == 0
+    response = json.loads(capsys.readouterr().out)
+    output_path = Path(response["receipt"])
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert output_path.exists()
+    assert result["evaluation_type"] == "single-finalist-holdout"
+    assert result["holdout_used"] is True
+    assert result["automatic_promotion"] is False
+    assert result["decision"] == "holdout_candidate"
+    assert result["thresholds"] == {
+        "minimum_precision_gain": 0.0,
+        "maximum_recall_loss": 0.0,
+        "maximum_empty_relevance_regression": 0,
+        "maximum_source_coverage_loss": 0,
+    }
+    assert "cases" not in result
+    marker = holdout_path.parent / f".holdout-{result['holdout_pool_id']}.consumed.json"
+    assert marker.exists()
+    assert marker.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(ValidationExperimentError, match="already evaluated"):
+        run_holdout_paths(holdout_path, registration_path, output_dir, k=1)
+    with pytest.raises(ValidationExperimentError, match="already consumed"):
+        run_holdout_paths(holdout_path, registration_path, tmp_path / "alternate-holdout-receipts", k=1)
+
+
+def test_holdout_registration_rejects_a_nonpassing_validation_receipt(tmp_path):
+    development_receipt_path = _development_receipt(tmp_path)
+    validation_source, validation_path, _ = _validation_pool(tmp_path)
+    validation_registration = register_validation(
+        development_receipt_path,
+        validation_pool_path=validation_source,
+        minimum_precision_gain=0.5,
+    )
+    validation_registration_path = tmp_path / "validation-registration.json"
+    validation_registration_path.write_text(json.dumps(validation_registration), encoding="utf-8")
+    validation_receipt, _ = run_validation_paths(
+        validation_path, validation_registration_path, tmp_path / "validation-receipts", k=1,
+    )
+    assert validation_receipt["decision"] == "retain_baseline"
+    validation_receipt_path = tmp_path / "validation-receipt.json"
+    validation_receipt_path.write_text(json.dumps(validation_receipt), encoding="utf-8")
+    holdout_source, _ = _holdout_pool(tmp_path)
+    with pytest.raises(ValidationExperimentError, match="passed validation"):
+        register_holdout(
+            validation_receipt_path,
+            validation_registration_path,
+            holdout_pool_path=holdout_source,
+            minimum_precision_gain=0.0,
+            maximum_recall_loss=0.0,
+        )

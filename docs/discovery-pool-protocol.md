@@ -126,10 +126,33 @@ marker directory unreadable to proposal agents and register the finalist before
 opening labels. A process with the same file access can bypass this convention by
 copying the pool or removing the marker.
 
+After a passing validation receipt, the maintainer may register a single holdout
+comparison before preparing/opening holdout labels:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m citegeist register-holdout \
+  --validation-receipt /private/citegeist/validation/receipts/validation-taskset.json \
+  --validation-registration /private/citegeist/validation/registration.json \
+  --holdout-pool /private/citegeist/holdout-task-set.json \
+  --minimum-precision-gain 0.05 \
+  --maximum-recall-loss 0.02 \
+  --maximum-empty-relevance-regression 0 \
+  --maximum-source-coverage-loss 0 \
+  --output /private/citegeist/holdout/registration.json
+
+PYTHONPATH=src .venv/bin/python -m citegeist evaluate-holdout \
+  --holdout /private/citegeist/holdout/prepared-pool.json \
+  --registration /private/citegeist/holdout/registration.json \
+  --output-dir /private/citegeist/holdout/receipts
+```
+
 The recorder, task-set assembler, local-corpus fingerprint, split-bound judgments,
-expanded rubric, double-review comparison/adjudication workflow, and aggregate-only
-validation evaluator are implemented. The task-inventory protocol is ready for a
-human-curated pilot, but no human-reviewed task set or labels are checked in.
-Externally enforced access isolation and a one-shot holdout procedure remain future
-work. These commands prepare evidence; they do not make the search system
-self-modify or promote a ranking configuration.
+expanded rubric, double-review comparison/adjudication workflow, aggregate-only
+validation evaluator, and one-shot holdout evaluator are implemented. `register-holdout`
+requires a passing validation receipt and freezes quality and coverage tolerances;
+`evaluate-holdout` writes only aggregate results and a pool-scoped consumption marker.
+No human-reviewed task set or labels are checked in. External access isolation and
+operator protection of the holdout labels and marker remain necessary. Empty-relevance
+cases are only a proxy for no-answer tasks; the task schema does not yet record
+answerability or support abstention. These commands prepare evidence; they do not
+make the search system self-modify or promote a ranking configuration.

@@ -140,6 +140,28 @@ def build_parser() -> argparse.ArgumentParser:
     validation_parser.add_argument("--output-dir", required=True, help="Private one-shot validation receipt directory")
     validation_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
 
+    holdout_register_parser = subparsers.add_parser(
+        "register-holdout",
+        help="Pre-register holdout thresholds for a finalist that passed validation",
+    )
+    holdout_register_parser.add_argument("--validation-receipt", required=True)
+    holdout_register_parser.add_argument("--validation-registration", required=True)
+    holdout_register_parser.add_argument("--holdout-pool", required=True, help="Unlabelled assembled holdout task set")
+    holdout_register_parser.add_argument("--minimum-precision-gain", type=float, required=True)
+    holdout_register_parser.add_argument("--maximum-recall-loss", type=float, required=True)
+    holdout_register_parser.add_argument("--maximum-empty-relevance-regression", type=int, default=0)
+    holdout_register_parser.add_argument("--maximum-source-coverage-loss", type=int, default=0)
+    holdout_register_parser.add_argument("--output", required=True, help="New private holdout registration artifact")
+
+    holdout_parser = subparsers.add_parser(
+        "evaluate-holdout",
+        help="Run the registered finalist once on the locked holdout pool",
+    )
+    holdout_parser.add_argument("--holdout", required=True, help="Private prepared holdout pool")
+    holdout_parser.add_argument("--registration", required=True, help="Pre-registration created before holdout labels were opened")
+    holdout_parser.add_argument("--output-dir", required=True, help="Private one-shot holdout receipt directory")
+    holdout_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
+
     ingest_parser = subparsers.add_parser("ingest", help="Ingest BibTeX into the database")
     ingest_parser.add_argument("input", help="BibTeX file to ingest")
     ingest_parser.add_argument("--status", default="draft", help="Initial review status")
@@ -931,8 +953,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(result, indent=2))
         return 0
-    if args.command in {"register-validation", "validate-rank"}:
-        from .validation_experiment import ValidationExperimentError, register_validation, run_validation_paths
+    if args.command in {"register-validation", "validate-rank", "register-holdout", "evaluate-holdout"}:
+        from .validation_experiment import (
+            ValidationExperimentError, register_holdout, register_validation,
+            run_holdout_paths, run_validation_paths,
+        )
         from .discovery_pool import write_private_json
         try:
             if args.command == "register-validation":
@@ -944,9 +969,26 @@ def main(argv: list[str] | None = None) -> int:
                 write_private_json(Path(args.output), registration)
                 output = Path(args.output)
                 decision = "registered"
-            else:
+            elif args.command == "validate-rank":
                 receipt, output = run_validation_paths(
                     Path(args.validation), Path(args.registration), Path(args.output_dir), k=args.k,
+                )
+                decision = receipt["decision"]
+            elif args.command == "register-holdout":
+                registration = register_holdout(
+                    Path(args.validation_receipt), Path(args.validation_registration),
+                    holdout_pool_path=Path(args.holdout_pool),
+                    minimum_precision_gain=args.minimum_precision_gain,
+                    maximum_recall_loss=args.maximum_recall_loss,
+                    maximum_empty_relevance_regression=args.maximum_empty_relevance_regression,
+                    maximum_source_coverage_loss=args.maximum_source_coverage_loss,
+                )
+                write_private_json(Path(args.output), registration)
+                output = Path(args.output)
+                decision = "registered"
+            else:
+                receipt, output = run_holdout_paths(
+                    Path(args.holdout), Path(args.registration), Path(args.output_dir), k=args.k,
                 )
                 decision = receipt["decision"]
         except (ValidationExperimentError, OSError, ValueError) as exc:

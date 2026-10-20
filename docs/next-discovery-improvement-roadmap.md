@@ -32,6 +32,10 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
   effect against the exact unlabelled candidate inventory. `validate-rank` checks
   those bytes, consumes a pool-scoped one-shot marker, and returns aggregates only.
   Operator protection of the marker and validation mount remains required.
+- `register-holdout` accepts only a finalist with a passing validation receipt and
+  freezes precision, recall-loss, empty-relevance, and provider-coverage tolerances
+  against the unlabelled holdout inventory. `evaluate-holdout` consumes a separate
+  pool-scoped marker and reports aggregate-only results; it never promotes a profile.
 - `sandbox-proposal` can run a local proposal executable in a network-disabled
   bubblewrap namespace with a sanitized development pool and one proposal output
   mount. It does not sandbox an AI orchestration process running outside that
@@ -201,6 +205,23 @@ confirmatory release decision.
 **Deliverable:** one-shot aggregate receipt, human adoption decision, opt-in profile,
 monitoring record, and rollback instructions—or a documented decision to retain the
 baseline.
+
+**Implementation note:** `register-holdout` verifies the validation receipt and its
+registration chain, then freezes the same baseline/finalist plus the unlabelled
+holdout pool hash and candidate inventory. It records a minimum precision gain,
+maximum tolerated recall loss, maximum increase in top-k returns on empty-relevance
+cases, and maximum loss of provider coverage compared with the baseline.
+`evaluate-holdout` shares the validation evaluator's fixed-candidate, graded
+relevance, identity, version, and provenance checks; it adds those registered gates,
+returns aggregates only, and writes a private one-shot marker beside the prepared
+holdout pool. It cannot change defaults or authorize pilot adoption.
+
+Empty relevance is only a proxy for no-answer behavior because the current task
+schema does not separately label answerability or support abstention. Provider
+coverage counts providers represented among selected top-k results. Neither measure
+establishes user-facing abstention quality. N4 still needs human-reviewed task sets,
+an enforced boundary around holdout labels and marker storage, a human adoption
+decision, opt-in profile, pilot monitoring, and rollback procedure.
 
 ## How results guide further work
 

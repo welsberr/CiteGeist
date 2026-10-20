@@ -198,13 +198,16 @@ def evaluate_validation(
     recall: dict[str, list[float]] = {"baseline": [], "finalist": []}
     graded_ndcg: dict[str, list[float]] = {"baseline": [], "finalist": []}
     paired = {"finalist_wins": 0, "baseline_wins": 0, "ties": 0}
+    empty_relevance_cases = 0
+    empty_relevance_top_k_returns = {"baseline": 0, "finalist": 0}
     selected_count = 0
     identity_bad = 0
     identity_unassessed = 0
     version_bad = 0
     version_unassessed = 0
     provenance_missing = 0
-    source_types: dict[str, int] = {}
+    source_types: dict[str, dict[str, int]] = {"baseline": {}, "finalist": {}}
+    source_providers: dict[str, dict[str, int]] = {"baseline": {}, "finalist": {}}
     fixed_candidate_sets = True
     incomplete_graded_cases = 0
     relevance_grade_mismatches = 0
@@ -224,6 +227,10 @@ def evaluate_validation(
             if scored["recall_at_k"] is not None:
                 recall[config_name].append(scored["recall_at_k"])
             case_scores[config_name] = scored["precision_at_k"]
+            if not case["relevant_ids"] and ranked_ids[:k]:
+                empty_relevance_top_k_returns[config_name] += 1
+        if not case["relevant_ids"]:
+            empty_relevance_cases += 1
         if case_scores["finalist"] > case_scores["baseline"]:
             paired["finalist_wins"] += 1
         elif case_scores["finalist"] < case_scores["baseline"]:
@@ -234,6 +241,14 @@ def evaluate_validation(
         ranked = ranked_by_config["finalist"]
         candidate_by_id = {candidate["id"]: candidate for candidate in case["candidates"]}
         expected_ids = {candidate["id"] for candidate in case["candidates"]}
+        for config_name in ("baseline", "finalist"):
+            for candidate_id in ranked_by_config[config_name][:k]:
+                kind = str(candidate_by_id[candidate_id].get("entry_type") or "unknown")
+                source_types[config_name][kind] = source_types[config_name].get(kind, 0) + 1
+                providers = set(candidate_by_id[candidate_id].get("providers", []))
+                providers.update(candidate_by_id[candidate_id].get("provider_ranks", {}))
+                for provider in providers or {"unknown"}:
+                    source_providers[config_name][provider] = source_providers[config_name].get(provider, 0) + 1
         if len(ranked) != len(set(ranked)) or set(ranked) != expected_ids:
             fixed_candidate_sets = False
         judgments = case.get("quality_judgments", {})
@@ -268,8 +283,6 @@ def evaluate_validation(
             selected_count += 1
             if not candidate.get("providers"):
                 provenance_missing += 1
-            kind = str(candidate.get("entry_type") or "unknown")
-            source_types[kind] = source_types.get(kind, 0) + 1
             dimensions = judgments.get(candidate_id, {}) if isinstance(judgments, dict) else {}
             if not isinstance(dimensions, dict):
                 dimensions = {}
@@ -310,13 +323,17 @@ def evaluate_validation(
             "incomplete_graded_relevance_cases": incomplete_graded_cases,
             "binary_relevance_grade_mismatches": relevance_grade_mismatches,
             "paired_precision_cases": paired,
+            "empty_relevance_cases": empty_relevance_cases,
+            "empty_relevance_top_k_returns": empty_relevance_top_k_returns,
             "finalist_top_k_count": selected_count,
             "selected_identity_errors": identity_bad,
             "selected_identity_unassessed_or_uncertain": identity_unassessed,
             "selected_version_errors": version_bad,
             "selected_version_unassessed_or_uncertain": version_unassessed,
             "selected_missing_provenance": provenance_missing,
-            "selected_entry_types": dict(sorted(source_types.items())),
+            "selected_entry_types": {name: dict(sorted(values.items())) for name, values in source_types.items()},
+            "selected_entry_type_coverage": {name: len(values) for name, values in source_types.items()},
+            "selected_provider_coverage": {name: dict(sorted(values.items())) for name, values in source_providers.items()},
         },
         "critical_checks": checks,
         "minimum_precision_gain": registration["minimum_precision_gain"],
@@ -382,6 +399,292 @@ def _claim_validation_once(
         raise ValidationExperimentError(
             f"validation registration already consumed for task set {registration['validation_pool_id']}"
         ) from exc
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(content, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    return marker
+
+
+def register_holdout(
+    validation_receipt_path: Path,
+    validation_registration_path: Path,
+    *,
+    holdout_pool_path: Path,
+    minimum_precision_gain: float,
+    maximum_recall_loss: float,
+    maximum_empty_relevance_regression: int = 0,
+    maximum_source_coverage_loss: int = 0,
+) -> dict[str, Any]:
+    """Freeze a holdout comparison only after the registered finalist passed validation."""
+    receipt, receipt_bytes = _load_json(validation_receipt_path)
+    validation_registration, validation_registration_bytes = _load_json(validation_registration_path)
+    validation_registration = _validate_registration(validation_registration)
+    _require(isinstance(receipt, dict), "validation receipt must be an object")
+    _require(receipt.get("schema_version") == 1, "unsupported validation receipt schema")
+    _require(receipt.get("evaluation_type") == "single-finalist-validation", "receipt is not a validation evaluation")
+    _require(receipt.get("decision") == "validation_candidate", "holdout requires a finalist that passed validation")
+    _require(receipt.get("automatic_promotion") is False, "validation receipt must not claim automatic promotion")
+    _require(receipt.get("holdout_used") is False, "validation receipt must not use holdout data")
+    _require(receipt.get("registration_id") == validation_registration["registration_id"], "validation receipt does not match its registration")
+    _require(receipt.get("registration_sha256") == _sha256(validation_registration_bytes), "validation registration bytes do not match the receipt")
+    _require(receipt.get("validation_pool_id") == validation_registration["validation_pool_id"], "validation receipt pool does not match its registration")
+    checks = receipt.get("critical_checks")
+    _require(isinstance(checks, dict) and bool(checks) and all(value is True for value in checks.values()), "validation receipt has failed or missing critical checks")
+    try:
+        holdout_source, holdout_source_bytes = _read_pool(holdout_pool_path)
+    except DiscoveryPoolError as exc:
+        raise ValidationExperimentError(f"invalid unlabelled holdout pool: {exc}") from exc
+    holdout_pool_id = holdout_source.get("pool_id")
+    _require(
+        isinstance(holdout_pool_id, str) and re.fullmatch(r"taskset-[a-f0-9]{20}", holdout_pool_id),
+        "holdout pool ID must identify an assembled task set",
+    )
+    holdout_cases = [case for case in holdout_source["cases"] if case.get("split") == "holdout"]
+    _require(bool(holdout_cases), "candidate pool has no holdout cases")
+    _require(
+        not any("relevant_ids" in case or "quality_judgments" in case for case in holdout_source["cases"]),
+        "registration requires the unlabelled holdout task set",
+    )
+    _require(
+        isinstance(minimum_precision_gain, (int, float))
+        and not isinstance(minimum_precision_gain, bool)
+        and 0 <= minimum_precision_gain <= 1,
+        "minimum_precision_gain must be in [0, 1]",
+    )
+    _require(
+        isinstance(maximum_recall_loss, (int, float))
+        and not isinstance(maximum_recall_loss, bool)
+        and 0 <= maximum_recall_loss <= 1,
+        "maximum_recall_loss must be in [0, 1]",
+    )
+    _require(
+        isinstance(maximum_empty_relevance_regression, int)
+        and not isinstance(maximum_empty_relevance_regression, bool)
+        and 0 <= maximum_empty_relevance_regression <= len(holdout_cases),
+        "maximum_empty_relevance_regression must be from zero to the number of holdout cases",
+    )
+    _require(
+        isinstance(maximum_source_coverage_loss, int)
+        and not isinstance(maximum_source_coverage_loss, bool)
+        and 0 <= maximum_source_coverage_loss <= len({
+            provider
+            for case in holdout_cases
+            for candidate in case["candidates"]
+            for provider in (set(candidate.get("providers", [])) | set(candidate.get("provider_ranks", {})))
+        }),
+        "maximum_source_coverage_loss must be from zero to the distinct holdout provider count",
+    )
+    body = {
+        "schema_version": 1,
+        "registration_type": "single-finalist-holdout",
+        "holdout_pool_id": holdout_pool_id,
+        "holdout_source_pool_sha256": _sha256(holdout_source_bytes),
+        "holdout_candidate_inventory_sha256": candidate_inventory_fingerprint(holdout_cases),
+        "validation_registration_id": validation_registration["registration_id"],
+        "validation_receipt_sha256": _sha256(receipt_bytes),
+        "baseline": validation_registration["baseline"],
+        "finalist": validation_registration["finalist"],
+        "minimum_precision_gain": float(minimum_precision_gain),
+        "maximum_recall_loss": float(maximum_recall_loss),
+        "maximum_empty_relevance_regression": maximum_empty_relevance_regression,
+        "maximum_source_coverage_loss": maximum_source_coverage_loss,
+    }
+    body["registration_id"] = f"registration-{_sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode())[:20]}"
+    return body
+
+
+def _validate_holdout_registration(registration: Any) -> dict[str, Any]:
+    _require(isinstance(registration, dict), "holdout registration must be an object")
+    fields = {
+        "schema_version", "registration_type", "holdout_pool_id", "holdout_source_pool_sha256",
+        "holdout_candidate_inventory_sha256", "validation_registration_id", "validation_receipt_sha256",
+        "baseline", "finalist", "minimum_precision_gain", "maximum_recall_loss",
+        "maximum_empty_relevance_regression", "maximum_source_coverage_loss", "registration_id",
+    }
+    _require(set(registration) == fields, "holdout registration contains missing or unsupported fields")
+    _require(registration.get("schema_version") == 1, "unsupported holdout registration schema")
+    _require(registration.get("registration_type") == "single-finalist-holdout", "unsupported holdout registration type")
+    _require(
+        isinstance(registration.get("holdout_pool_id"), str)
+        and re.fullmatch(r"taskset-[a-f0-9]{20}", registration["holdout_pool_id"]),
+        "invalid registered holdout pool ID",
+    )
+    for field in ("holdout_source_pool_sha256", "holdout_candidate_inventory_sha256", "validation_receipt_sha256"):
+        _require(isinstance(registration.get(field), str) and re.fullmatch(r"[a-f0-9]{64}", registration[field]), f"{field} must be a SHA-256 hash")
+    _require(
+        isinstance(registration.get("validation_registration_id"), str)
+        and re.fullmatch(r"registration-[a-f0-9]{20}", registration["validation_registration_id"]),
+        "validation_registration_id is invalid",
+    )
+    _require(isinstance(registration.get("baseline"), dict) and isinstance(registration.get("finalist"), dict), "registered configs are required")
+    for field in ("minimum_precision_gain", "maximum_recall_loss"):
+        value = registration.get(field)
+        _require(isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1, f"invalid {field}")
+    regression = registration.get("maximum_empty_relevance_regression")
+    _require(isinstance(regression, int) and not isinstance(regression, bool) and regression >= 0, "invalid maximum_empty_relevance_regression")
+    coverage_loss = registration.get("maximum_source_coverage_loss")
+    _require(isinstance(coverage_loss, int) and not isinstance(coverage_loss, bool) and coverage_loss >= 0, "invalid maximum_source_coverage_loss")
+    core = {key: registration[key] for key in registration if key != "registration_id"}
+    expected_id = f"registration-{_sha256(json.dumps(core, sort_keys=True, separators=(',', ':')).encode())[:20]}"
+    _require(registration.get("registration_id") == expected_id, "holdout registration integrity check failed")
+    return registration
+
+
+def evaluate_holdout(
+    holdout_pool: Any,
+    registration: Any,
+    *,
+    holdout_bytes: bytes,
+    registration_bytes: bytes,
+    k: int = 10,
+) -> dict[str, Any]:
+    """Evaluate a registered finalist once and return aggregate-only holdout evidence."""
+    registration = _validate_holdout_registration(registration)
+    _require(isinstance(k, int) and not isinstance(k, bool) and 1 <= k <= 20, "k must be an integer from 1 to 20")
+    _require(isinstance(holdout_pool, dict) and holdout_pool.get("split") == "holdout", "input must be a holdout-split pool")
+    try:
+        pool = _validate_pool(holdout_pool, "holdout")
+    except RankingExperimentError as exc:
+        raise ValidationExperimentError(str(exc)) from exc
+    _require(pool.get("pool_id") == registration["holdout_pool_id"], "holdout pool does not match pre-registration")
+    _require(pool.get("source_pool_sha256") == registration["holdout_source_pool_sha256"], "holdout pool does not come from the pre-registered source-pool bytes")
+    _require(
+        candidate_inventory_fingerprint(pool["cases"]) == registration["holdout_candidate_inventory_sha256"],
+        "holdout candidate inventory changed after pre-registration",
+    )
+    # The validation evaluator owns the shared ranking and critical-check logic. This
+    # private adapter changes only the stage binding; holdout fields remain separately
+    # registered and are restored in the public receipt below.
+    proxy = {
+        "schema_version": 1,
+        "registration_type": "single-finalist-validation",
+        "validation_pool_id": registration["holdout_pool_id"],
+        "validation_source_pool_sha256": registration["holdout_source_pool_sha256"],
+        "validation_candidate_inventory_sha256": registration["holdout_candidate_inventory_sha256"],
+        "development_receipt_sha256": registration["validation_receipt_sha256"],
+        "baseline": registration["baseline"],
+        "finalist": registration["finalist"],
+        "minimum_precision_gain": registration["minimum_precision_gain"],
+    }
+    proxy["registration_id"] = f"registration-{_sha256(json.dumps(proxy, sort_keys=True, separators=(',', ':')).encode())[:20]}"
+    proxy_pool = dict(pool)
+    proxy_pool["split"] = "validation"
+    result = evaluate_validation(
+        proxy_pool,
+        proxy,
+        validation_bytes=holdout_bytes,
+        registration_bytes=registration_bytes,
+        k=k,
+    )
+    aggregate = result["aggregate"]
+    baseline_recall = aggregate["mean_recall_at_k"]["baseline"]
+    finalist_recall = aggregate["mean_recall_at_k"]["finalist"]
+    recall_gain = None if baseline_recall is None or finalist_recall is None else round(finalist_recall - baseline_recall, 6)
+    empty_counts = aggregate["empty_relevance_top_k_returns"]
+    empty_regression = empty_counts["finalist"] - empty_counts["baseline"]
+    selected_providers = aggregate["selected_provider_coverage"]
+    source_coverage_loss = len(set(selected_providers["baseline"]) - set(selected_providers["finalist"]))
+    holdout_checks = {
+        **result["critical_checks"],
+        "recall_loss_within_tolerance": recall_gain is not None and recall_gain >= -registration["maximum_recall_loss"],
+        "empty_relevance_regression_within_tolerance": empty_regression <= registration["maximum_empty_relevance_regression"],
+        "source_coverage_within_tolerance": source_coverage_loss <= registration["maximum_source_coverage_loss"],
+    }
+    passed = (
+        all(holdout_checks.values())
+        and aggregate["mean_precision_at_k"]["paired_gain"] >= registration["minimum_precision_gain"]
+    )
+    result.pop("validation_pool_id", None)
+    result.pop("validation_pool_sha256", None)
+    result.update({
+        "evaluation_type": "single-finalist-holdout",
+        "registration_id": registration["registration_id"],
+        "holdout_pool_id": pool["pool_id"],
+        "holdout_pool_sha256": _sha256(holdout_bytes),
+        "holdout_source_pool_sha256": registration["holdout_source_pool_sha256"],
+        "holdout_candidate_inventory_sha256": registration["holdout_candidate_inventory_sha256"],
+        "validation_registration_id": registration["validation_registration_id"],
+        "validation_receipt_sha256": registration["validation_receipt_sha256"],
+        "holdout_used": True,
+        "thresholds": {
+            "minimum_precision_gain": registration["minimum_precision_gain"],
+            "maximum_recall_loss": registration["maximum_recall_loss"],
+            "maximum_empty_relevance_regression": registration["maximum_empty_relevance_regression"],
+            "maximum_source_coverage_loss": registration["maximum_source_coverage_loss"],
+        },
+        "critical_checks": holdout_checks,
+        "aggregate": {
+            **aggregate,
+            "mean_recall_at_k": {**aggregate["mean_recall_at_k"], "paired_gain": recall_gain},
+            "empty_relevance_top_k_returns": {**empty_counts, "paired_regression": empty_regression},
+            "source_provider_coverage": {
+                "baseline_provider_count": len(selected_providers["baseline"]),
+                "finalist_provider_count": len(selected_providers["finalist"]),
+                "baseline_providers_lost": source_coverage_loss,
+            },
+        },
+        "decision": "holdout_candidate" if passed else "retain_baseline",
+        "automatic_promotion": False,
+    })
+    return result
+
+
+def run_holdout_paths(
+    holdout_path: Path,
+    registration_path: Path,
+    output_dir: Path,
+    *,
+    k: int = 10,
+) -> tuple[dict[str, Any], Path]:
+    holdout, holdout_bytes = _load_json(holdout_path)
+    registration, registration_bytes = _load_json(registration_path)
+    if not isinstance(holdout, dict) or not isinstance(holdout.get("pool_id"), str):
+        raise ValidationExperimentError("holdout pool is malformed")
+    _validate_holdout_registration(registration)
+    if holdout.get("pool_id") != registration["holdout_pool_id"]:
+        raise ValidationExperimentError("holdout pool does not match pre-registration")
+    output_path = output_dir / f"holdout-{holdout['pool_id']}.json"
+    if output_path.exists():
+        raise ValidationExperimentError(f"holdout set already evaluated in this output directory: {holdout['pool_id']}")
+    result = evaluate_holdout(
+        holdout,
+        registration,
+        holdout_bytes=holdout_bytes,
+        registration_bytes=registration_bytes,
+        k=k,
+    )
+    _claim_holdout_once(holdout_path, registration, holdout_bytes, registration_bytes)
+    try:
+        write_private_json(output_path, result)
+    except DiscoveryPoolError as exc:
+        raise ValidationExperimentError(str(exc)) from exc
+    return result, output_path
+
+
+def _claim_holdout_once(
+    holdout_path: Path,
+    registration: dict[str, Any],
+    holdout_bytes: bytes,
+    registration_bytes: bytes,
+) -> Path:
+    """Persist a pool-scoped one-shot holdout claim beside the protected pool."""
+    marker = holdout_path.resolve().parent / f".holdout-{registration['holdout_pool_id']}.consumed.json"
+    content = {
+        "schema_version": 1,
+        "registration_id": registration["registration_id"],
+        "holdout_pool_id": registration["holdout_pool_id"],
+        "registration_sha256": _sha256(registration_bytes),
+        "holdout_pool_sha256": _sha256(holdout_bytes),
+    }
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(marker, flags, 0o600)
+    except FileExistsError as exc:
+        raise ValidationExperimentError(f"holdout registration already consumed for task set {registration['holdout_pool_id']}") from exc
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         json.dump(content, stream, indent=2, sort_keys=True)
         stream.write("\n")
