@@ -150,6 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
     holdout_register_parser.add_argument("--minimum-precision-gain", type=float, required=True)
     holdout_register_parser.add_argument("--maximum-recall-loss", type=float, required=True)
     holdout_register_parser.add_argument("--maximum-empty-relevance-regression", type=int, default=0)
+    holdout_register_parser.add_argument("--maximum-unanswerable-false-positive-regression", type=int, default=0)
+    holdout_register_parser.add_argument("--maximum-unanswerable-false-positives", type=int, default=0)
     holdout_register_parser.add_argument("--maximum-source-coverage-loss", type=int, default=0)
     holdout_register_parser.add_argument("--output", required=True, help="New private holdout registration artifact")
 
@@ -981,6 +983,8 @@ def main(argv: list[str] | None = None) -> int:
                     minimum_precision_gain=args.minimum_precision_gain,
                     maximum_recall_loss=args.maximum_recall_loss,
                     maximum_empty_relevance_regression=args.maximum_empty_relevance_regression,
+                    maximum_unanswerable_false_positive_regression=args.maximum_unanswerable_false_positive_regression,
+                    maximum_unanswerable_false_positives=args.maximum_unanswerable_false_positives,
                     maximum_source_coverage_loss=args.maximum_source_coverage_loss,
                 )
                 write_private_json(Path(args.output), registration)

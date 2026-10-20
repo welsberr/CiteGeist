@@ -44,7 +44,7 @@ PYTHONPATH=src .venv/bin/python -m citegeist assemble-pool \
 ```
 
 The split manifest has `schema_version: 1`, `rubric_version:
-research-relevance-v2`, and an `assignments` list. Each item has a recorded
+research-relevance-v3`, and an `assignments` list. Each item has a recorded
 `case_id`, a `split` (`development`, `validation`, or `holdout`), and a
 `topic_family`. Case IDs appear in each source pool's `cases` array. Assign
 related questions together before exposing judgment templates to reviewers.
@@ -92,8 +92,8 @@ missing, or extra case/candidate labels, and unsupported judgments. It writes a
 new private artifact with binary `relevant_ids`, the selected split, orthogonal
 quality judgments, and provenance hashes. The development runner rejects
 validation and holdout pools and checks that every relevant ID belongs to the
-fixed candidate set. Keep validation and holdout labels outside the proposal
-process.
+fixed candidate set. Judgment templates include a case-level answerability label.
+Keep validation and holdout labels outside the proposal process.
 
 After development selects a finalist, the maintainer can register it against one
 validation task set and a minimum useful effect before opening validation labels:
@@ -137,6 +137,8 @@ PYTHONPATH=src .venv/bin/python -m citegeist register-holdout \
   --minimum-precision-gain 0.05 \
   --maximum-recall-loss 0.02 \
   --maximum-empty-relevance-regression 0 \
+  --maximum-unanswerable-false-positive-regression 0 \
+  --maximum-unanswerable-false-positives 0 \
   --maximum-source-coverage-loss 0 \
   --output /private/citegeist/holdout/registration.json
 
@@ -152,7 +154,9 @@ validation evaluator, and one-shot holdout evaluator are implemented. `register-
 requires a passing validation receipt and freezes quality and coverage tolerances;
 `evaluate-holdout` writes only aggregate results and a pool-scoped consumption marker.
 No human-reviewed task set or labels are checked in. External access isolation and
-operator protection of the holdout labels and marker remain necessary. Empty-relevance
-cases are only a proxy for no-answer tasks; the task schema does not yet record
-answerability or support abstention. These commands prepare evidence; they do not
-make the search system self-modify or promote a ranking configuration.
+operator protection of the holdout labels and marker remain necessary. Reviewers now
+record answerability per case and the evaluator counts top-k results returned for
+explicitly unanswerable cases. The ranker has no abstention threshold, so a strict
+false-positive gate will retain the baseline until a separate abstention policy is
+tested. These commands prepare evidence; they do not make the search system
+self-modify or promote a ranking configuration.

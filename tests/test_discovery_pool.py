@@ -84,7 +84,7 @@ def test_pool_assembly_requires_exact_topic_family_split_assignments(tmp_path):
     manifest_path = tmp_path / "splits.json"
     manifest = {
         "schema_version": 1,
-        "rubric_version": "research-relevance-v2",
+        "rubric_version": "research-relevance-v3",
         "assignments": [
             {"case_id": first_case, "split": "development", "topic_family": "navigation"},
             {"case_id": second_case, "split": "holdout", "topic_family": "navigation"},
@@ -108,7 +108,7 @@ def _write_pool(tmp_path, *, split="development"):
     split_path = tmp_path / "split-manifest.json"
     split_path.write_text(json.dumps({
         "schema_version": 1,
-        "rubric_version": "research-relevance-v2",
+        "rubric_version": "research-relevance-v3",
         "assignments": [{
             "case_id": case["case_id"], "split": split, "topic_family": "marine acoustics",
         } for case in raw_pool["cases"]],
@@ -122,7 +122,7 @@ def test_judgment_template_binds_exact_pool_bytes_and_requires_complete_labels(t
     pool_path = _write_pool(tmp_path)
     template = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
     assert template["pool_sha256"]
-    assert template["rubric_version"] == "research-relevance-v2"
+    assert template["rubric_version"] == "research-relevance-v3"
     judgments_path = tmp_path / "judgments.json"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     with pytest.raises(DiscoveryPoolError, match="every candidate"):
@@ -134,6 +134,10 @@ def test_judgment_template_binds_exact_pool_bytes_and_requires_complete_labels(t
     template["judgments"][0]["candidate_judgments"][0]["version_match"] = "yes"
     template["judgments"][0]["candidate_judgments"][0]["source_authority"] = "strong"
     template["judgments"][0]["candidate_judgments"][0]["evidence_support"] = "direct"
+    judgments_path.write_text(json.dumps(template), encoding="utf-8")
+    with pytest.raises(DiscoveryPoolError, match="answerability must be assessed"):
+        prepare_rank_pool(pool_path, judgments_path, split="development")
+    template["judgments"][0]["answerability"] = "answerable"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
     development = prepare_rank_pool(pool_path, judgments_path, split="development")
     assert development["split"] == "development"
@@ -185,6 +189,7 @@ def test_cli_creates_label_template_and_private_development_pool(tmp_path, capsy
     dev_path = tmp_path / "dev.json"
     assert main(["label-template", "--pool", str(pool_path), "--split", "development", "--reviewer-id", "reviewer-a", "--output", str(judgments_path)]) == 0
     template = json.loads(judgments_path.read_text(encoding="utf-8"))
+    template["judgments"][0]["answerability"] = "answerable"
     for item in template["judgments"][0]["candidate_judgments"]:
         item["relevance"] = "not_relevant"
     judgments_path.write_text(json.dumps(template), encoding="utf-8")
@@ -199,8 +204,10 @@ def test_independent_reviews_require_explicit_adjudication_and_preserve_disagree
     second = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-b")
     for item in first["judgments"][0]["candidate_judgments"]:
         item.update(relevance="not_relevant", identity_correct="yes", version_match="yes", source_authority="adequate", evidence_support="direct")
+    first["judgments"][0]["answerability"] = "answerable"
     for item in second["judgments"][0]["candidate_judgments"]:
         item.update(relevance="not_relevant", identity_correct="yes", version_match="yes", source_authority="adequate", evidence_support="direct")
+    second["judgments"][0]["answerability"] = "answerable"
     first["judgments"][0]["candidate_judgments"][0]["relevance"] = "useful"
     second["judgments"][0]["candidate_judgments"][0]["relevance"] = "essential"
     first_path, second_path = tmp_path / "first.json", tmp_path / "second.json"
@@ -208,7 +215,7 @@ def test_independent_reviews_require_explicit_adjudication_and_preserve_disagree
     second_path.write_text(json.dumps(second), encoding="utf-8")
 
     comparison = compare_reviews(pool_path, first_path, second_path)
-    assert comparison["agreement_count"] == 9
+    assert comparison["agreement_count"] == 10
     assert comparison["disagreement_count"] == 1
     assert comparison["disagreements"][0]["first"] == "useful"
     adjudication_path = tmp_path / "adjudication.json"
@@ -237,6 +244,34 @@ def test_double_review_rejects_same_reviewer_and_incomplete_coverage(tmp_path):
     second_path.write_text(json.dumps(second), encoding="utf-8")
     with pytest.raises(DiscoveryPoolError, match="distinct reviewer_id"):
         compare_reviews(pool_path, first_path, second_path)
+
+
+def test_case_answerability_disagreement_is_adjudicated_and_joined(tmp_path):
+    pool_path = _write_pool(tmp_path)
+    first = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
+    second = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-b")
+    for review, answerability in ((first, "answerable"), (second, "unanswerable")):
+        case = review["judgments"][0]
+        case["answerability"] = answerability
+        for candidate in case["candidate_judgments"]:
+            candidate.update(
+                relevance="not_relevant", identity_correct="yes", version_match="yes",
+                source_authority="adequate", evidence_support="direct",
+            )
+    first_path, second_path = tmp_path / "first.json", tmp_path / "second.json"
+    first_path.write_text(json.dumps(first), encoding="utf-8")
+    second_path.write_text(json.dumps(second), encoding="utf-8")
+    comparison = compare_reviews(pool_path, first_path, second_path)
+    assert comparison["disagreement_count"] == 1
+    assert comparison["disagreements"][0]["dimension"] == "answerability"
+    comparison["decisions"][0]["decision"] = "unanswerable"
+    adjudication_path = tmp_path / "adjudication.json"
+    adjudication_path.write_text(json.dumps(comparison), encoding="utf-8")
+    reviewed = adjudicate_reviews(pool_path, first_path, second_path, adjudication_path, adjudicator_id="adjudicator")
+    reviewed_path = tmp_path / "reviewed.json"
+    reviewed_path.write_text(json.dumps(reviewed), encoding="utf-8")
+    prepared = prepare_rank_pool(pool_path, reviewed_path, split="development")
+    assert prepared["cases"][0]["answerability"] == "unanswerable"
 
 
 def test_research_cli_records_pool_without_changing_sqlite(tmp_path, capsys):

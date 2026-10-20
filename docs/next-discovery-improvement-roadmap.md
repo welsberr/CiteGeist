@@ -33,9 +33,10 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
   those bytes, consumes a pool-scoped one-shot marker, and returns aggregates only.
   Operator protection of the marker and validation mount remains required.
 - `register-holdout` accepts only a finalist with a passing validation receipt and
-  freezes precision, recall-loss, empty-relevance, and provider-coverage tolerances
-  against the unlabelled holdout inventory. `evaluate-holdout` consumes a separate
-  pool-scoped marker and reports aggregate-only results; it never promotes a profile.
+  freezes precision, recall-loss, explicit unanswerable-case, empty-relevance, and
+  provider-coverage tolerances against the unlabelled holdout inventory.
+  `evaluate-holdout` consumes a separate pool-scoped marker and reports aggregate-only
+  results; it never promotes a profile.
 - `sandbox-proposal` can run a local proposal executable in a network-disabled
   bubblewrap namespace with a sanitized development pool and one proposal output
   mount. It does not sandbox an AI orchestration process running outside that
@@ -210,18 +211,24 @@ baseline.
 registration chain, then freezes the same baseline/finalist plus the unlabelled
 holdout pool hash and candidate inventory. It records a minimum precision gain,
 maximum tolerated recall loss, maximum increase in top-k returns on empty-relevance
-cases, and maximum loss of provider coverage compared with the baseline.
+cases, maximum unanswerable false positives, and maximum loss of provider coverage
+compared with the baseline. The review rubric now records case-level answerability
+(`answerable`, `unanswerable`, or `uncertain`) separately from candidate relevance,
+and review comparison/adjudication preserves that case label.
 `evaluate-holdout` shares the validation evaluator's fixed-candidate, graded
 relevance, identity, version, and provenance checks; it adds those registered gates,
 returns aggregates only, and writes a private one-shot marker beside the prepared
 holdout pool. It cannot change defaults or authorize pilot adoption.
 
-Empty relevance is only a proxy for no-answer behavior because the current task
-schema does not separately label answerability or support abstention. Provider
-coverage counts providers represented among selected top-k results. Neither measure
-establishes user-facing abstention quality. N4 still needs human-reviewed task sets,
-an enforced boundary around holdout labels and marker storage, a human adoption
-decision, opt-in profile, pilot monitoring, and rollback procedure.
+The evaluator counts results returned for explicitly unanswerable cases, but the
+current ranker always orders the fixed candidates and has no abstention threshold.
+It cannot yet demonstrate intentional abstention; a strict false-positive limit can
+therefore retain the baseline. Empty-relevance cases remain a separate diagnostic
+proxy. Provider coverage counts providers represented among selected top-k results.
+N4 still needs human-reviewed task sets, an enforced boundary around holdout labels
+and marker storage, a human adoption decision, opt-in profile, pilot monitoring, and
+rollback procedure. A tested abstention policy should be a separate development and
+validation hypothesis before any profile can pass a no-answer gate.
 
 ## How results guide further work
 

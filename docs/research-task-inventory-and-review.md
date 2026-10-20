@@ -15,7 +15,7 @@ holdout before any candidate labels are collected. A task inventory should inclu
 {
   "schema_version": 1,
   "inventory_id": "citegeist-pilot-2026-01",
-  "rubric_version": "research-relevance-v2",
+  "rubric_version": "research-relevance-v3",
   "tasks": [
     {
       "case_id": "case-example-001",
@@ -45,7 +45,8 @@ documentation or authoritative web references; recent or version-sensitive
 updates; and genuinely unanswerable or deliberately out-of-scope questions. A task
 may have multiple tags. Track expected answerability as `answerable`,
 `no_answer_expected`, or `uncertain`; this is a curator hypothesis, not a label
-that forces reviewers to find a source. Include source-type requirements and
+that forces reviewers to find a source. Reviewers separately record case-level
+answerability in the review artifact. Include source-type requirements and
 exclusions in the task brief where the researcher actually has them.
 
 The 60-task / 20-per-split proposal in the roadmap is a cost-planning pilot, not a
@@ -87,6 +88,7 @@ apply the dimensions independently:
 
 | Dimension | Guidance |
 | --- | --- |
+| `answerability` (case-level) | Is the information need answerable within the task's stated scope, based on inspected evidence and known reference notes? Choose `unanswerable` only when the task is out of scope or no useful/essential source can answer it; a missing candidate is a retrieval miss, not proof of no answer. Use `uncertain` when the evidence cannot distinguish these. |
 | `relevance` | `essential` directly satisfies the need; `useful` materially helps; `background` gives context but does not answer it; `not_relevant` does not help. Use `unjudged` only while work is incomplete. |
 | `identity_correct` | Does the record identify the intended work or resource? A similar title is not enough. Use `uncertain` when identifiers or metadata conflict. |
 | `version_match` | Does the cited edition, preprint/published version, dataset vintage, or documentation version fit the task? Use `not_applicable` when no meaningful version distinction exists. |
@@ -98,6 +100,12 @@ is correct. Record uncertainty instead of forcing a binary answer. A `no_answer`
 task can still have useful sources that clarify the gap; do not label every result
 negative merely because a curator expects no single answer. Conversely, absence of
 a known answer is not proof that retrieval found nothing useful.
+
+The prepared ranking pool carries the adjudicated answerability label per case.
+Validation and holdout receipts count top-k results returned for explicitly
+unanswerable cases. The current ranker always orders the fixed candidates and has
+no abstention threshold, so this measures false-positive exposure; it does not
+claim that the system can intentionally abstain.
 
 ## Compare and adjudicate
 

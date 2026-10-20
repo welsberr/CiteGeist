@@ -200,6 +200,8 @@ def evaluate_validation(
     paired = {"finalist_wins": 0, "baseline_wins": 0, "ties": 0}
     empty_relevance_cases = 0
     empty_relevance_top_k_returns = {"baseline": 0, "finalist": 0}
+    answerability_case_counts = {"answerable": 0, "unanswerable": 0, "uncertain": 0, "unassessed": 0}
+    unanswerable_top_k_returns = {"baseline": 0, "finalist": 0}
     selected_count = 0
     identity_bad = 0
     identity_unassessed = 0
@@ -214,6 +216,10 @@ def evaluate_validation(
 
     for case in pool["cases"]:
         case_count += 1
+        answerability = case.get("answerability", "unassessed")
+        if not isinstance(answerability, str) or answerability not in answerability_case_counts:
+            raise ValidationExperimentError(f"{case['case_id']}: invalid answerability label")
+        answerability_case_counts[answerability] += 1
         case_scores: dict[str, float] = {}
         ranked_by_config: dict[str, list[str]] = {}
         for config_name in ("baseline", "finalist"):
@@ -229,6 +235,8 @@ def evaluate_validation(
             case_scores[config_name] = scored["precision_at_k"]
             if not case["relevant_ids"] and ranked_ids[:k]:
                 empty_relevance_top_k_returns[config_name] += 1
+            if answerability == "unanswerable" and ranked_ids[:k]:
+                unanswerable_top_k_returns[config_name] += 1
         if not case["relevant_ids"]:
             empty_relevance_cases += 1
         if case_scores["finalist"] > case_scores["baseline"]:
@@ -325,6 +333,8 @@ def evaluate_validation(
             "paired_precision_cases": paired,
             "empty_relevance_cases": empty_relevance_cases,
             "empty_relevance_top_k_returns": empty_relevance_top_k_returns,
+            "answerability_case_counts": answerability_case_counts,
+            "unanswerable_top_k_returns": unanswerable_top_k_returns,
             "finalist_top_k_count": selected_count,
             "selected_identity_errors": identity_bad,
             "selected_identity_unassessed_or_uncertain": identity_unassessed,
@@ -416,6 +426,8 @@ def register_holdout(
     maximum_recall_loss: float,
     maximum_empty_relevance_regression: int = 0,
     maximum_source_coverage_loss: int = 0,
+    maximum_unanswerable_false_positive_regression: int = 0,
+    maximum_unanswerable_false_positives: int = 0,
 ) -> dict[str, Any]:
     """Freeze a holdout comparison only after the registered finalist passed validation."""
     receipt, receipt_bytes = _load_json(validation_receipt_path)
@@ -466,6 +478,18 @@ def register_holdout(
         "maximum_empty_relevance_regression must be from zero to the number of holdout cases",
     )
     _require(
+        isinstance(maximum_unanswerable_false_positive_regression, int)
+        and not isinstance(maximum_unanswerable_false_positive_regression, bool)
+        and 0 <= maximum_unanswerable_false_positive_regression <= len(holdout_cases),
+        "maximum_unanswerable_false_positive_regression must be from zero to the number of holdout cases",
+    )
+    _require(
+        isinstance(maximum_unanswerable_false_positives, int)
+        and not isinstance(maximum_unanswerable_false_positives, bool)
+        and 0 <= maximum_unanswerable_false_positives <= len(holdout_cases),
+        "maximum_unanswerable_false_positives must be from zero to the number of holdout cases",
+    )
+    _require(
         isinstance(maximum_source_coverage_loss, int)
         and not isinstance(maximum_source_coverage_loss, bool)
         and 0 <= maximum_source_coverage_loss <= len({
@@ -489,6 +513,8 @@ def register_holdout(
         "minimum_precision_gain": float(minimum_precision_gain),
         "maximum_recall_loss": float(maximum_recall_loss),
         "maximum_empty_relevance_regression": maximum_empty_relevance_regression,
+        "maximum_unanswerable_false_positive_regression": maximum_unanswerable_false_positive_regression,
+        "maximum_unanswerable_false_positives": maximum_unanswerable_false_positives,
         "maximum_source_coverage_loss": maximum_source_coverage_loss,
     }
     body["registration_id"] = f"registration-{_sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode())[:20]}"
@@ -501,7 +527,8 @@ def _validate_holdout_registration(registration: Any) -> dict[str, Any]:
         "schema_version", "registration_type", "holdout_pool_id", "holdout_source_pool_sha256",
         "holdout_candidate_inventory_sha256", "validation_registration_id", "validation_receipt_sha256",
         "baseline", "finalist", "minimum_precision_gain", "maximum_recall_loss",
-        "maximum_empty_relevance_regression", "maximum_source_coverage_loss", "registration_id",
+        "maximum_empty_relevance_regression", "maximum_source_coverage_loss",
+        "maximum_unanswerable_false_positive_regression", "maximum_unanswerable_false_positives", "registration_id",
     }
     _require(set(registration) == fields, "holdout registration contains missing or unsupported fields")
     _require(registration.get("schema_version") == 1, "unsupported holdout registration schema")
@@ -524,6 +551,18 @@ def _validate_holdout_registration(registration: Any) -> dict[str, Any]:
         _require(isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1, f"invalid {field}")
     regression = registration.get("maximum_empty_relevance_regression")
     _require(isinstance(regression, int) and not isinstance(regression, bool) and regression >= 0, "invalid maximum_empty_relevance_regression")
+    unanswerable_regression = registration.get("maximum_unanswerable_false_positive_regression")
+    _require(
+        isinstance(unanswerable_regression, int) and not isinstance(unanswerable_regression, bool) and unanswerable_regression >= 0,
+        "invalid maximum_unanswerable_false_positive_regression",
+    )
+    unanswerable_false_positives = registration.get("maximum_unanswerable_false_positives")
+    _require(
+        isinstance(unanswerable_false_positives, int)
+        and not isinstance(unanswerable_false_positives, bool)
+        and unanswerable_false_positives >= 0,
+        "invalid maximum_unanswerable_false_positives",
+    )
     coverage_loss = registration.get("maximum_source_coverage_loss")
     _require(isinstance(coverage_loss, int) and not isinstance(coverage_loss, bool) and coverage_loss >= 0, "invalid maximum_source_coverage_loss")
     core = {key: registration[key] for key in registration if key != "registration_id"}
@@ -548,6 +587,12 @@ def evaluate_holdout(
         pool = _validate_pool(holdout_pool, "holdout")
     except RankingExperimentError as exc:
         raise ValidationExperimentError(str(exc)) from exc
+    if any(
+        not isinstance(case.get("answerability"), str)
+        or case["answerability"] not in {"answerable", "unanswerable", "uncertain"}
+        for case in pool["cases"]
+    ):
+        raise ValidationExperimentError("holdout requires an explicit answerability judgment for every case")
     _require(pool.get("pool_id") == registration["holdout_pool_id"], "holdout pool does not match pre-registration")
     _require(pool.get("source_pool_sha256") == registration["holdout_source_pool_sha256"], "holdout pool does not come from the pre-registered source-pool bytes")
     _require(
@@ -584,12 +629,20 @@ def evaluate_holdout(
     recall_gain = None if baseline_recall is None or finalist_recall is None else round(finalist_recall - baseline_recall, 6)
     empty_counts = aggregate["empty_relevance_top_k_returns"]
     empty_regression = empty_counts["finalist"] - empty_counts["baseline"]
+    unanswerable_counts = aggregate["unanswerable_top_k_returns"]
+    unanswerable_regression = unanswerable_counts["finalist"] - unanswerable_counts["baseline"]
     selected_providers = aggregate["selected_provider_coverage"]
     source_coverage_loss = len(set(selected_providers["baseline"]) - set(selected_providers["finalist"]))
     holdout_checks = {
         **result["critical_checks"],
         "recall_loss_within_tolerance": recall_gain is not None and recall_gain >= -registration["maximum_recall_loss"],
         "empty_relevance_regression_within_tolerance": empty_regression <= registration["maximum_empty_relevance_regression"],
+        "unanswerable_false_positive_regression_within_tolerance": (
+            unanswerable_regression <= registration["maximum_unanswerable_false_positive_regression"]
+        ),
+        "unanswerable_false_positives_within_tolerance": (
+            unanswerable_counts["finalist"] <= registration["maximum_unanswerable_false_positives"]
+        ),
         "source_coverage_within_tolerance": source_coverage_loss <= registration["maximum_source_coverage_loss"],
     }
     passed = (
@@ -612,6 +665,8 @@ def evaluate_holdout(
             "minimum_precision_gain": registration["minimum_precision_gain"],
             "maximum_recall_loss": registration["maximum_recall_loss"],
             "maximum_empty_relevance_regression": registration["maximum_empty_relevance_regression"],
+            "maximum_unanswerable_false_positive_regression": registration["maximum_unanswerable_false_positive_regression"],
+            "maximum_unanswerable_false_positives": registration["maximum_unanswerable_false_positives"],
             "maximum_source_coverage_loss": registration["maximum_source_coverage_loss"],
         },
         "critical_checks": holdout_checks,
@@ -619,6 +674,8 @@ def evaluate_holdout(
             **aggregate,
             "mean_recall_at_k": {**aggregate["mean_recall_at_k"], "paired_gain": recall_gain},
             "empty_relevance_top_k_returns": {**empty_counts, "paired_regression": empty_regression},
+            "unanswerable_case_count": aggregate["answerability_case_counts"]["unanswerable"],
+            "unanswerable_top_k_returns": {**unanswerable_counts, "paired_regression": unanswerable_regression},
             "source_provider_coverage": {
                 "baseline_provider_count": len(selected_providers["baseline"]),
                 "finalist_provider_count": len(selected_providers["finalist"]),

@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from citegeist.discovery_pool import build_judgment_template, prepare_rank_pool
+from citegeist.discovery_pool import assemble_candidate_pools, build_candidate_pool, build_judgment_template, prepare_rank_pool
 from citegeist.cli import main
+from citegeist.research_discovery import ResearchBrief
 from citegeist.ranking_experiment import run_ranking_experiment
 from citegeist.validation_experiment import (
     ValidationExperimentError,
@@ -13,7 +14,7 @@ from citegeist.validation_experiment import (
     run_holdout_paths,
     run_validation_paths,
 )
-from test_discovery_pool import _write_pool
+from test_discovery_pool import _report, _write_pool
 
 
 def _development_receipt(tmp_path):
@@ -55,6 +56,7 @@ def _validation_pool(tmp_path):
     assembled_path = _write_pool(tmp_path, split="validation")
     template = build_judgment_template(assembled_path, split="validation", reviewer_id="validation-reviewer")
     for case in template["judgments"]:
+        case["answerability"] = "answerable"
         for candidate in case["candidate_judgments"]:
             candidate["relevance"] = "essential" if candidate["candidate_id"].startswith("doi:") else "not_relevant"
             candidate["identity_correct"] = "yes"
@@ -68,11 +70,38 @@ def _validation_pool(tmp_path):
 
 
 def _holdout_pool(tmp_path):
-    assembled_path = _write_pool(tmp_path, split="holdout")
+    _write_pool(tmp_path, split="holdout")
+    first_source = tmp_path / "raw-pool.json"
+    second_report = _report()
+    second_report.brief = ResearchBrief(
+        "an unanswerable query with no useful sources",
+        sources=("crossref", "openalex"),
+        per_source_limit=5,
+    )
+    second_source = tmp_path / "second-raw-pool.json"
+    second_source.write_text(json.dumps(build_candidate_pool(second_report), indent=2), encoding="utf-8")
+    first_pool = json.loads(first_source.read_text(encoding="utf-8"))
+    second_pool = json.loads(second_source.read_text(encoding="utf-8"))
+    manifest_path = tmp_path / "holdout-split-manifest.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": 1,
+        "rubric_version": "research-relevance-v3",
+        "assignments": [
+            {"case_id": first_pool["cases"][0]["case_id"], "split": "holdout", "topic_family": "marine acoustics"},
+            {"case_id": second_pool["cases"][0]["case_id"], "split": "holdout", "topic_family": "marine acoustics"},
+        ],
+    }), encoding="utf-8")
+    assembled_path = tmp_path / "holdout-taskset.json"
+    assembled_path.write_text(
+        json.dumps(assemble_candidate_pools([first_source, second_source], manifest_path), indent=2),
+        encoding="utf-8",
+    )
     template = build_judgment_template(assembled_path, split="holdout", reviewer_id="holdout-reviewer")
-    for case in template["judgments"]:
+    for case_index, case in enumerate(template["judgments"]):
+        is_answerable = case_index == 0
+        case["answerability"] = "answerable" if is_answerable else "unanswerable"
         for candidate in case["candidate_judgments"]:
-            candidate["relevance"] = "essential" if candidate["candidate_id"].startswith("doi:") else "not_relevant"
+            candidate["relevance"] = "essential" if is_answerable and candidate["candidate_id"].startswith("doi:") else "not_relevant"
             candidate["identity_correct"] = "yes"
             candidate["version_match"] = "yes"
     labels_path = tmp_path / "holdout-labels.json"
@@ -237,6 +266,8 @@ def test_one_shot_holdout_requires_passed_validation_and_freezes_tolerances(tmp_
         "--validation-registration", str(validation_registration_path),
         "--holdout-pool", str(holdout_source), "--minimum-precision-gain", "0",
         "--maximum-recall-loss", "0", "--maximum-empty-relevance-regression", "0",
+        "--maximum-unanswerable-false-positive-regression", "0",
+        "--maximum-unanswerable-false-positives", "0",
         "--maximum-source-coverage-loss", "0", "--output", str(registration_path),
     ]) == 0
     capsys.readouterr()
@@ -253,11 +284,16 @@ def test_one_shot_holdout_requires_passed_validation_and_freezes_tolerances(tmp_
     assert result["evaluation_type"] == "single-finalist-holdout"
     assert result["holdout_used"] is True
     assert result["automatic_promotion"] is False
-    assert result["decision"] == "holdout_candidate"
+    assert result["decision"] == "retain_baseline"
+    assert result["aggregate"]["unanswerable_case_count"] == 1
+    assert result["aggregate"]["unanswerable_top_k_returns"]["finalist"] == 1
+    assert result["critical_checks"]["unanswerable_false_positives_within_tolerance"] is False
     assert result["thresholds"] == {
         "minimum_precision_gain": 0.0,
         "maximum_recall_loss": 0.0,
         "maximum_empty_relevance_regression": 0,
+        "maximum_unanswerable_false_positive_regression": 0,
+        "maximum_unanswerable_false_positives": 0,
         "maximum_source_coverage_loss": 0,
     }
     assert "cases" not in result

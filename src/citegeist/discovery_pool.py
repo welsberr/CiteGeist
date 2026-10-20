@@ -16,7 +16,7 @@ from .resolver.identifiers import entry_identifiers, extract_doi
 
 
 SCHEMA_VERSION = 1
-RUBRIC_VERSION = "research-relevance-v2"
+RUBRIC_VERSION = "research-relevance-v3"
 SPLITS = ("development", "validation", "holdout")
 MAX_POOL_BYTES = 8 * 1024 * 1024
 MAX_CANDIDATES_PER_CASE = 500
@@ -299,6 +299,9 @@ _JUDGMENT_DIMENSIONS = {
     "source_authority": {"strong", "adequate", "weak", "uncertain", "unassessed"},
     "evidence_support": {"direct", "indirect", "none", "uncertain", "unassessed"},
 }
+_CASE_JUDGMENT_DIMENSIONS = {"answerability": {"answerable", "unanswerable", "uncertain", "unassessed"}}
+_ALL_JUDGMENT_DIMENSIONS = {**_JUDGMENT_DIMENSIONS, **_CASE_JUDGMENT_DIMENSIONS}
+_CASE_JUDGMENT_ID = "@case"
 
 
 def build_judgment_template(pool_path: Path, *, split: str, reviewer_id: str) -> dict[str, Any]:
@@ -319,7 +322,7 @@ def build_judgment_template(pool_path: Path, *, split: str, reviewer_id: str) ->
         "split": split,
         "reviewer_id": reviewer_id,
         "judgments": [
-            {"case_id": case["case_id"], "candidate_judgments": [
+            {"case_id": case["case_id"], "answerability": "unassessed", "candidate_judgments": [
                 {"candidate_id": candidate["id"], **{
                     dimension: ("unjudged" if dimension == "relevance" else "unassessed")
                     for dimension in _JUDGMENT_DIMENSIONS
@@ -350,12 +353,15 @@ def compare_reviews(pool_path: Path, first_path: Path, second_path: Path) -> dic
         for candidate in case["candidates"]
         for dimension in _JUDGMENT_DIMENSIONS
     }
+    expected_labels.update((case["case_id"], _CASE_JUDGMENT_ID, "answerability") for case in expected_cases)
     left = _flatten_review(first)
     right = _flatten_review(second)
     if left.keys() != expected_labels or right.keys() != expected_labels:
         raise DiscoveryPoolError("each independent review must cover every candidate and dimension in the fixed pool split")
     if any(value == "unjudged" for (case_id, candidate_id, dimension), value in left.items() if dimension == "relevance"):
         raise DiscoveryPoolError("each reviewer must complete relevance labels before comparison")
+    if any(value == "unassessed" for (case_id, candidate_id, dimension), value in left.items() if dimension == "answerability"):
+        raise DiscoveryPoolError("each reviewer must assess answerability for every case before comparison")
     agreements = []
     disagreements = []
     for key in sorted(left):
@@ -414,7 +420,7 @@ def adjudicate_reviews(pool_path: Path, first_path: Path, second_path: Path, adj
             raise DiscoveryPoolError("adjudication contains an extra or duplicate decision")
         if item["decision"] == "unresolved":
             raise DiscoveryPoolError("adjudication must explicitly resolve every disagreement")
-        if item["decision"] not in _JUDGMENT_DIMENSIONS[ item["dimension"] ] - {"unjudged", "unassessed"}:
+        if item["decision"] not in _ALL_JUDGMENT_DIMENSIONS[item["dimension"]] - {"unjudged", "unassessed"}:
             raise DiscoveryPoolError(f"adjudication decision is not a completed {item['dimension']} value")
         resolved[key] = item["decision"]
     first, _ = _read_review(first_path)
@@ -423,6 +429,7 @@ def adjudicate_reviews(pool_path: Path, first_path: Path, second_path: Path, adj
         labels[key] = decision
     judgments = deepcopy(first)
     for case in judgments["judgments"]:
+        case["answerability"] = labels[(case["case_id"], _CASE_JUDGMENT_ID, "answerability")]
         for candidate in case["candidate_judgments"]:
             for dimension in _JUDGMENT_DIMENSIONS:
                 candidate[dimension] = labels[(case["case_id"], candidate["candidate_id"], dimension)]
@@ -469,8 +476,12 @@ def _flatten_review(review: dict[str, Any]) -> dict[tuple[str, str, str], str]:
     if not isinstance(cases, list):
         raise DiscoveryPoolError("review judgments must be a list")
     for case in cases:
-        if not isinstance(case, dict) or set(case) != {"case_id", "candidate_judgments"} or not isinstance(case.get("case_id"), str):
-            raise DiscoveryPoolError("review case records must contain case_id and candidate_judgments")
+        if not isinstance(case, dict) or set(case) != {"case_id", "answerability", "candidate_judgments"} or not isinstance(case.get("case_id"), str):
+            raise DiscoveryPoolError("review case records must contain case_id, answerability, and candidate_judgments")
+        answerability = case.get("answerability")
+        if not isinstance(answerability, str) or answerability not in _CASE_JUDGMENT_DIMENSIONS["answerability"]:
+            raise DiscoveryPoolError(f"{case['case_id']}: invalid answerability")
+        flattened[(case["case_id"], _CASE_JUDGMENT_ID, "answerability")] = answerability
         if not isinstance(case["candidate_judgments"], list):
             raise DiscoveryPoolError(f"{case['case_id']}: candidate_judgments must be a list")
         for candidate in case["candidate_judgments"]:
@@ -482,7 +493,8 @@ def _flatten_review(review: dict[str, Any]) -> dict[tuple[str, str, str], str]:
                 if not isinstance(label, str) or label not in values:
                     raise DiscoveryPoolError(f"{case['case_id']}/{candidate['candidate_id']}: invalid {dimension}")
                 flattened[(case["case_id"], candidate["candidate_id"], dimension)] = label
-    if len(flattened) != sum(len(case["candidate_judgments"]) * len(_JUDGMENT_DIMENSIONS) for case in cases):
+    expected_count = sum(len(case["candidate_judgments"]) * len(_JUDGMENT_DIMENSIONS) + 1 for case in cases)
+    if len(flattened) != expected_count:
         raise DiscoveryPoolError("review contains duplicate case/candidate/dimension labels")
     return flattened
 
@@ -538,11 +550,11 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
                 raise DiscoveryPoolError("review_provenance contains a malformed disagreement")
             dimension = disagreement["dimension"]
             if (
-                not isinstance(dimension, str) or dimension not in _JUDGMENT_DIMENSIONS
+                not isinstance(dimension, str) or dimension not in _ALL_JUDGMENT_DIMENSIONS
                 or not isinstance(disagreement["first"], str)
                 or not isinstance(disagreement["second"], str)
-                or disagreement["first"] not in _JUDGMENT_DIMENSIONS[dimension]
-                or disagreement["second"] not in _JUDGMENT_DIMENSIONS[dimension]
+                or disagreement["first"] not in _ALL_JUDGMENT_DIMENSIONS[dimension]
+                or disagreement["second"] not in _ALL_JUDGMENT_DIMENSIONS[dimension]
                 or disagreement["first"] == disagreement["second"]
             ):
                 raise DiscoveryPoolError("review_provenance disagreement labels are invalid")
@@ -555,7 +567,7 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
             if (
                 key not in expected_decisions or expected_decisions[key] is not None
                 or not isinstance(dimension, str) or not isinstance(decision["decision"], str)
-                or decision["decision"] not in _JUDGMENT_DIMENSIONS.get(dimension, set()) - {"unjudged", "unassessed"}
+                or decision["decision"] not in _ALL_JUDGMENT_DIMENSIONS.get(dimension, set()) - {"unjudged", "unassessed"}
             ):
                 raise DiscoveryPoolError("review_provenance decisions do not resolve its disagreements")
             expected_decisions[key] = decision["decision"]
@@ -569,6 +581,7 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
             (case["case_id"], candidate["id"], dimension)
             for case in pool_cases for candidate in case["candidates"] for dimension in _JUDGMENT_DIMENSIONS
         }
+        valid_review_keys.update((case["case_id"], _CASE_JUDGMENT_ID, "answerability") for case in pool_cases)
         if any((item["case_id"], item["candidate_id"], item["dimension"]) not in valid_review_keys for item in provenance["disagreements"]):
             raise DiscoveryPoolError("review_provenance refers to an item outside the fixed pool split")
     cases = judgments.get("judgments")
@@ -578,10 +591,12 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
     for item in cases:
         if not isinstance(item, dict) or not isinstance(item.get("case_id"), str):
             raise DiscoveryPoolError("each judgment record needs case_id")
-        if set(item) != {"case_id", "candidate_judgments"}:
+        if set(item) != {"case_id", "answerability", "candidate_judgments"}:
             raise DiscoveryPoolError(f"{item.get('case_id', 'judgment')}: unsupported judgment fields")
         if item["case_id"] in judgment_by_case:
             raise DiscoveryPoolError(f"duplicate judgment case_id {item['case_id']}")
+        if not isinstance(item["answerability"], str) or item["answerability"] not in _CASE_JUDGMENT_DIMENSIONS["answerability"]:
+            raise DiscoveryPoolError(f"{item['case_id']}: invalid answerability")
         judgment_by_case[item["case_id"]] = item
     if set(judgment_by_case) != {case["case_id"] for case in pool_cases}:
         raise DiscoveryPoolError("judgment case IDs do not match the requested pool split")
@@ -619,11 +634,18 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
             raise DiscoveryPoolError(f"{case['case_id']}: label IDs do not match candidate IDs")
         if any(value["relevance"] == "unjudged" for value in by_id.values()):
             raise DiscoveryPoolError(f"{case['case_id']}: every candidate needs a relevance judgment")
+        answerability = item.get("answerability")
+        if not isinstance(answerability, str) or answerability not in _CASE_JUDGMENT_DIMENSIONS["answerability"] - {"unassessed"}:
+            raise DiscoveryPoolError(f"{case['case_id']}: answerability must be assessed before preparing a ranking pool")
+        adjudicated_answerability = adjudicated_values.get((case["case_id"], _CASE_JUDGMENT_ID, "answerability"))
+        if adjudicated_answerability is not None and answerability != adjudicated_answerability:
+            raise DiscoveryPoolError(f"{case['case_id']}: answerability does not match adjudication")
         dev_cases.append({
             "case_id": case["case_id"],
             "query": case["query"],
             "split": split,
             "topic_family": case.get("topic_family"),
+            "answerability": answerability,
             "relevant_ids": sorted(candidate_id for candidate_id, dimensions in by_id.items() if dimensions["relevance"] in {"useful", "essential"}),
             "candidates": case["candidates"],
             "quality_judgments": {candidate_id: value for candidate_id, value in sorted(by_id.items())},
