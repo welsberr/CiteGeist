@@ -1,6 +1,6 @@
 # Next roadmap: evidence-ready discovery and ranking
 
-Status: implementation in progress; N1, the split-aware N2 data path, two-reviewer comparison/adjudication, and aggregate-only N3 evaluator are implemented. Human task curation and access-control work remain outstanding.
+Status: implementation in progress; N1, the split-aware N2 data path, two-reviewer comparison/adjudication, aggregate-only N3 evaluator, and local proposal subprocess boundary are implemented. Human task curation and external orchestration isolation remain outstanding.
 Prepared: 17 October 2026.
 Audience: CiteGeist maintainers, researchers, and bounded ranking-proposal agents.
 
@@ -30,9 +30,12 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
   The local SQLite snapshot receives a path-independent content fingerprint.
 - `register-validation` freezes one development finalist and a predeclared minimum
   effect against the exact unlabelled candidate inventory. `validate-rank` checks
-  those bytes, evaluates once per task-set ID in a private output directory, and
-  returns aggregates only. External access isolation remains an operator
-  responsibility.
+  those bytes, consumes a pool-scoped one-shot marker, and returns aggregates only.
+  Operator protection of the marker and validation mount remains required.
+- `sandbox-proposal` can run a local proposal executable in a network-disabled
+  bubblewrap namespace with a sanitized development pool and one proposal output
+  mount. It does not sandbox an AI orchestration process running outside that
+  namespace.
 - The experiment ranker is separate from CiteGeist's production ranking. A proposal
   result cannot change ordinary search behavior.
 
@@ -174,8 +177,12 @@ changing the receipt output directory or copying the registration file does not
 permit a second evaluation of that pool at its protected path. This is not an
 OS-level isolation boundary: an agent with the same filesystem access can copy
 the pool and remove the marker.
-The controlled account/mount setup and access-failure tests remain prerequisites
-before N3 can pass its exit condition or be treated as confirmatory validation.
+`sandbox-proposal` now gives a local proposal subprocess a separate bubblewrap mount
+and network namespace, sanitizes its development input, and tests that validation
+canaries and inherited secrets are inaccessible. It does not constrain an AI
+orchestrator running outside that subprocess. N3 remains unqualified until the
+actual proposal orchestration uses an enforced boundary and operators protect the
+validation mount and consumption marker from that process.
 
 ### N4 — One-shot holdout and opt-in pilot
 

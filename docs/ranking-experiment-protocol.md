@@ -29,6 +29,27 @@ bytes and repository state, every tested configuration and its parent lineage, r
 development scores, the selected development finalist, and an explicit statement
 that no automatic promotion or locked holdout evaluation occurred.
 
+For a local proposal generator, run it through the optional bubblewrap boundary so
+the generator itself cannot inspect host validation labels or the repository:
+
+```sh
+citegeist sandbox-proposal \
+  --development /private/citegeist/dev-pool.json \
+  --output /private/citegeist/proposals.json \
+  --timeout 300 -- /usr/local/bin/citegeist-local-proposer
+```
+
+The child reads the sanitized development pool at
+`$CITEGEIST_DEVELOPMENT_POOL` and writes JSON to
+`$CITEGEIST_PROPOSAL_OUTPUT`. It receives no inherited environment, home directory,
+project checkout, database, validation artifacts, or network namespace. CiteGeist
+validates the result against the JSON proposal schema before publishing it with
+owner-only permissions; the trusted maintainer then runs `experiment-rank` outside
+the child sandbox. This requires Linux bubblewrap and an installed local proposal
+command. It does not wrap an AI tool whose orchestration or file access occurs in a
+separate host process; use that tool's own OS/container isolation for that process.
+The command fails closed when bubblewrap cannot establish its namespaces.
+
 Example proposal file:
 
 ```json
@@ -59,7 +80,7 @@ and positive-integer `provider_ranks`. See
 small synthetic example. That fixture verifies runner mechanics only; it is not
 quality evidence.
 
-This command is intentionally a development tool, not a sandbox against a malicious
+`experiment-rank` is intentionally a development evaluator, not a sandbox against a malicious
 or unrestricted process. Its output includes query-level development metrics and
 should remain private. Use only non-sensitive development data and store both inputs
 and receipts outside public or production paths. Do not pass validation or locked

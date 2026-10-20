@@ -113,6 +113,15 @@ def build_parser() -> argparse.ArgumentParser:
     experiment_parser.add_argument("--output", required=True, help="New private JSON receipt path; existing files are never overwritten")
     experiment_parser.add_argument("--k", type=int, default=10, help="Ranking cutoff (1-20; default: 10)")
 
+    sandbox_parser = subparsers.add_parser(
+        "sandbox-proposal",
+        help="Run a local proposal command with a development-only, network-disabled bubblewrap sandbox",
+    )
+    sandbox_parser.add_argument("--development", required=True, help="Fixed development pool visible read-only to the child")
+    sandbox_parser.add_argument("--output", required=True, help="New private proposal JSON path")
+    sandbox_parser.add_argument("--timeout", type=int, default=300, help="Wall-clock command limit in seconds (1-900)")
+    sandbox_parser.add_argument("agent_command", nargs=argparse.REMAINDER, help="Command after --; writes JSON to $CITEGEIST_PROPOSAL_OUTPUT")
+
     register_parser = subparsers.add_parser(
         "register-validation",
         help="Pre-register the development finalist and minimum useful effect before validation",
@@ -908,6 +917,19 @@ def main(argv: list[str] | None = None) -> int:
             "finalist": receipt["selection"]["development_finalist_id"],
             "automatic_promotion": False,
         }, indent=2))
+        return 0
+    if args.command == "sandbox-proposal":
+        from .proposal_sandbox import ProposalSandboxError, run_proposal_sandbox
+        agent_command = args.agent_command[1:] if args.agent_command[:1] == ["--"] else args.agent_command
+        try:
+            result = run_proposal_sandbox(
+                Path(args.development), Path(args.output), agent_command,
+                timeout_seconds=args.timeout,
+            )
+        except (ProposalSandboxError, OSError, ValueError) as exc:
+            print(f"Proposal sandbox error: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(result, indent=2))
         return 0
     if args.command in {"register-validation", "validate-rank"}:
         from .validation_experiment import ValidationExperimentError, register_validation, run_validation_paths
