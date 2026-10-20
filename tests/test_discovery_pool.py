@@ -9,8 +9,10 @@ from citegeist.cli import main
 from citegeist.discovery_pool import (
     DiscoveryPoolError,
     assemble_candidate_pools,
+    adjudicate_reviews,
     build_candidate_pool,
     build_judgment_template,
+    compare_reviews,
     prepare_rank_pool,
     write_private_json,
 )
@@ -118,7 +120,7 @@ def _write_pool(tmp_path, *, split="development"):
 
 def test_judgment_template_binds_exact_pool_bytes_and_requires_complete_labels(tmp_path):
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path, split="development")
+    template = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
     assert template["pool_sha256"]
     assert template["rubric_version"] == "research-relevance-v2"
     judgments_path = tmp_path / "judgments.json"
@@ -142,7 +144,7 @@ def test_judgment_template_binds_exact_pool_bytes_and_requires_complete_labels(t
 
 def test_label_join_rejects_changed_bytes_unknown_ids_and_duplicate_labels(tmp_path):
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path, split="development")
+    template = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
     labels = template["judgments"][0]["candidate_judgments"]
     labels[0]["relevance"] = labels[1]["relevance"] = "not_relevant"
     judgments_path = tmp_path / "judgments.json"
@@ -154,7 +156,7 @@ def test_label_join_rejects_changed_bytes_unknown_ids_and_duplicate_labels(tmp_p
 
     pool_path.unlink()
     pool_path = _write_pool(tmp_path)
-    template = build_judgment_template(pool_path, split="development")
+    template = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
     labels = template["judgments"][0]["candidate_judgments"]
     labels[0]["relevance"] = labels[1]["relevance"] = "not_relevant"
     labels[1]["candidate_id"] = labels[0]["candidate_id"]
@@ -181,7 +183,7 @@ def test_cli_creates_label_template_and_private_development_pool(tmp_path, capsy
     pool_path = _write_pool(tmp_path)
     judgments_path = tmp_path / "judgments.json"
     dev_path = tmp_path / "dev.json"
-    assert main(["label-template", "--pool", str(pool_path), "--split", "development", "--output", str(judgments_path)]) == 0
+    assert main(["label-template", "--pool", str(pool_path), "--split", "development", "--reviewer-id", "reviewer-a", "--output", str(judgments_path)]) == 0
     template = json.loads(judgments_path.read_text(encoding="utf-8"))
     for item in template["judgments"][0]["candidate_judgments"]:
         item["relevance"] = "not_relevant"
@@ -189,6 +191,52 @@ def test_cli_creates_label_template_and_private_development_pool(tmp_path, capsy
     assert main(["prepare-rank-pool", "--pool", str(pool_path), "--judgments", str(judgments_path), "--split", "development", "--output", str(dev_path)]) == 0
     assert json.loads(dev_path.read_text(encoding="utf-8"))["split"] == "development"
     assert capsys.readouterr().out.count('"automatic_promotion": false') == 2
+
+
+def test_independent_reviews_require_explicit_adjudication_and_preserve_disagreement(tmp_path):
+    pool_path = _write_pool(tmp_path)
+    first = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-a")
+    second = build_judgment_template(pool_path, split="development", reviewer_id="reviewer-b")
+    for item in first["judgments"][0]["candidate_judgments"]:
+        item.update(relevance="not_relevant", identity_correct="yes", version_match="yes", source_authority="adequate", evidence_support="direct")
+    for item in second["judgments"][0]["candidate_judgments"]:
+        item.update(relevance="not_relevant", identity_correct="yes", version_match="yes", source_authority="adequate", evidence_support="direct")
+    first["judgments"][0]["candidate_judgments"][0]["relevance"] = "useful"
+    second["judgments"][0]["candidate_judgments"][0]["relevance"] = "essential"
+    first_path, second_path = tmp_path / "first.json", tmp_path / "second.json"
+    first_path.write_text(json.dumps(first), encoding="utf-8")
+    second_path.write_text(json.dumps(second), encoding="utf-8")
+
+    comparison = compare_reviews(pool_path, first_path, second_path)
+    assert comparison["agreement_count"] == 9
+    assert comparison["disagreement_count"] == 1
+    assert comparison["disagreements"][0]["first"] == "useful"
+    adjudication_path = tmp_path / "adjudication.json"
+    adjudication_path.write_text(json.dumps(comparison), encoding="utf-8")
+    with pytest.raises(DiscoveryPoolError, match="explicitly resolve"):
+        adjudicate_reviews(pool_path, first_path, second_path, adjudication_path, adjudicator_id="adjudicator")
+
+    comparison["decisions"][0]["decision"] = "essential"
+    adjudication_path.write_text(json.dumps(comparison), encoding="utf-8")
+    reviewed = adjudicate_reviews(pool_path, first_path, second_path, adjudication_path, adjudicator_id="adjudicator")
+    reviewed_path = tmp_path / "reviewed.json"
+    reviewed_path.write_text(json.dumps(reviewed), encoding="utf-8")
+    prepared = prepare_rank_pool(pool_path, reviewed_path, split="development")
+    assert prepared["cases"][0]["relevant_ids"] == ["doi:10.1234/abc.1"]
+    provenance = prepared["review_provenance"]
+    assert provenance["adjudicator_id"] == "adjudicator"
+    assert provenance["disagreements"][0]["second"] == "essential"
+
+
+def test_double_review_rejects_same_reviewer_and_incomplete_coverage(tmp_path):
+    pool_path = _write_pool(tmp_path)
+    first = build_judgment_template(pool_path, split="development", reviewer_id="same")
+    second = build_judgment_template(pool_path, split="development", reviewer_id="same")
+    first_path, second_path = tmp_path / "first.json", tmp_path / "second.json"
+    first_path.write_text(json.dumps(first), encoding="utf-8")
+    second_path.write_text(json.dumps(second), encoding="utf-8")
+    with pytest.raises(DiscoveryPoolError, match="distinct reviewer_id"):
+        compare_reviews(pool_path, first_path, second_path)
 
 
 def test_research_cli_records_pool_without_changing_sqlite(tmp_path, capsys):

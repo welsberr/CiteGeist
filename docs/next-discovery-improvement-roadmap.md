@@ -1,6 +1,6 @@
 # Next roadmap: evidence-ready discovery and ranking
 
-Status: implementation in progress; the N1 data path, expanded N2 preparation, and aggregate-only N3 evaluator are implemented, with review and access-control work outstanding.
+Status: implementation in progress; N1, the split-aware N2 data path, two-reviewer comparison/adjudication, and aggregate-only N3 evaluator are implemented. Human task curation and access-control work remain outstanding.
 Prepared: 17 October 2026.
 Audience: CiteGeist maintainers, researchers, and bounded ranking-proposal agents.
 
@@ -71,11 +71,15 @@ guarantee. Split by topic and related-work family to reduce leakage. Double-revi
 a subset and adjudicate disagreements.
 
 **Deliverable:** versioned task IDs, rubric, source-type strata, split manifest, and
-reviewer instructions. Development data can be shared with the proposal agent;
-validation and holdout labels remain private.
+reviewer instructions. The [task-inventory and review protocol](research-task-inventory-and-review.md)
+defines inventory fields, independent review, and explicit adjudication. Development
+data can be shared with the proposal agent; validation and holdout labels remain
+private. No benchmark tasks or labels are fabricated or checked in.
 
-**Exit condition:** reviewers can independently apply the rubric to examples and
-resolve disagreements without relying on the proposed ranking score.
+**Exit condition:** a human-curated pilot exists, reviewers independently apply
+the rubric to practice and pilot tasks without seeing ranking scores, and
+disagreements can be adjudicated with retained provenance. The 60-task suggestion
+is a labeling-cost starting point, not a statistical guarantee.
 
 ### N1 — Record discovery candidate pools
 
@@ -118,8 +122,10 @@ from identity correctness, version match, source authority, and evidence support
 The four relevance grades are not relevant, background, useful, and essential;
 useful/essential map to the binary development target, while validation reports
 graded nDCG. Other dimensions remain separate critical checks. Unjudged relevance
-blocks export. The reviewer instructions, double-review, and adjudication
-procedure still require human design and piloting.
+blocks export. `compare-reviews` records independent agreement and disagreement;
+`adjudicate-reviews` requires an explicit completed choice for each disagreement
+and preserves both reviewer labels and hashes. Reviewer guidance is documented;
+human calibration and pilot review remain outstanding.
 
 Create the development pool by joining reviewed labels to its fixed candidate pool.
 Run `citegeist experiment-rank` with a declared baseline and a small set of

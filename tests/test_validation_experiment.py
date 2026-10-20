@@ -51,7 +51,7 @@ def _development_receipt(tmp_path):
 
 def _validation_pool(tmp_path):
     assembled_path = _write_pool(tmp_path, split="validation")
-    template = build_judgment_template(assembled_path, split="validation")
+    template = build_judgment_template(assembled_path, split="validation", reviewer_id="validation-reviewer")
     for case in template["judgments"]:
         for candidate in case["candidate_judgments"]:
             candidate["relevance"] = "essential" if candidate["candidate_id"].startswith("doi:") else "not_relevant"

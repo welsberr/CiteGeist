@@ -72,7 +72,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     template_parser.add_argument("--pool", required=True, help="Recorded unlabelled candidate pool")
     template_parser.add_argument("--split", choices=("development", "validation", "holdout"), required=True)
+    template_parser.add_argument("--reviewer-id", required=True, help="Private reviewer code; do not use a public name")
     template_parser.add_argument("--output", required=True, help="New private judgment JSON path")
+
+    compare_parser = subparsers.add_parser(
+        "compare-reviews",
+        help="Compare two independent reviews and create an explicit adjudication template",
+    )
+    compare_parser.add_argument("--pool", required=True, help="Fixed assembled task set containing the reviewed split")
+    compare_parser.add_argument("--first", required=True, help="First independent review JSON")
+    compare_parser.add_argument("--second", required=True, help="Second independent review JSON")
+    compare_parser.add_argument("--output", required=True, help="New private comparison/adjudication JSON path")
+
+    adjudicate_parser = subparsers.add_parser(
+        "adjudicate-reviews",
+        help="Apply explicit decisions to all disagreements and create a prepared judgment artifact",
+    )
+    adjudicate_parser.add_argument("--pool", required=True, help="Fixed assembled task set containing the reviewed split")
+    adjudicate_parser.add_argument("--first", required=True, help="First independent review JSON")
+    adjudicate_parser.add_argument("--second", required=True, help="Second independent review JSON")
+    adjudicate_parser.add_argument("--adjudication", required=True, help="Completed compare-reviews artifact")
+    adjudicate_parser.add_argument("--adjudicator-id", required=True, help="Private adjudicator code")
+    adjudicate_parser.add_argument("--output", required=True, help="New private adjudicated judgment JSON path")
 
     prepare_parser = subparsers.add_parser(
         "prepare-rank-pool",
@@ -911,13 +932,20 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps({"receipt": str(output), "decision": decision, "automatic_promotion": False}, indent=2))
         return 0
-    if args.command in {"assemble-pool", "label-template", "prepare-rank-pool"}:
-        from .discovery_pool import DiscoveryPoolError, assemble_candidate_pools, build_judgment_template, prepare_rank_pool, write_private_json
+    if args.command in {"assemble-pool", "label-template", "prepare-rank-pool", "compare-reviews", "adjudicate-reviews"}:
+        from .discovery_pool import (
+            DiscoveryPoolError, adjudicate_reviews, assemble_candidate_pools,
+            build_judgment_template, compare_reviews, prepare_rank_pool, write_private_json,
+        )
         try:
             if args.command == "assemble-pool":
                 value = assemble_candidate_pools([Path(item) for item in args.pool], Path(args.splits))
             elif args.command == "label-template":
-                value = build_judgment_template(Path(args.pool), split=args.split)
+                value = build_judgment_template(Path(args.pool), split=args.split, reviewer_id=args.reviewer_id)
+            elif args.command == "compare-reviews":
+                value = compare_reviews(Path(args.pool), Path(args.first), Path(args.second))
+            elif args.command == "adjudicate-reviews":
+                value = adjudicate_reviews(Path(args.pool), Path(args.first), Path(args.second), Path(args.adjudication), adjudicator_id=args.adjudicator_id)
             else:
                 value = prepare_rank_pool(Path(args.pool), Path(args.judgments), split=args.split)
             write_private_json(Path(args.output), value)

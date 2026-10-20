@@ -53,9 +53,19 @@ Make and complete a separate judgment artifact for one split at a time:
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m citegeist label-template \
-  --pool /private/citegeist/task-set.json --split development \
+  --pool /private/citegeist/task-set.json --split development --reviewer-id reviewer-a \
   --output /private/citegeist/labels/development.json
 ```
+
+For double-reviewed work, create one template per reviewer using distinct private
+reviewer codes. Have them label independently before comparing. The
+[task-inventory and review protocol](research-task-inventory-and-review.md)
+defines task strata, blinding, rubric guidance, and calibration. Use
+`compare-reviews` to create an agreement/disagreement report with unresolved
+decisions, then fill every disputed dimension and run `adjudicate-reviews`. The
+adjudicated artifact preserves both source labels and their hashes; `prepare-rank-pool`
+accepts it and carries that review provenance forward. The compare step never
+averages judgments or silently resolves differences.
 
 The rubric records relevance as `not_relevant`, `background`, `useful`, or
 `essential`, plus separate identity correctness, version match, source authority,
@@ -116,8 +126,9 @@ before opening labels. A process with the same file access can bypass this
 convention or use another output directory.
 
 The recorder, task-set assembler, local-corpus fingerprint, split-bound judgments,
-expanded rubric, and aggregate-only validation evaluator are implemented. A
-reviewed task inventory, reviewer instructions, double-review/adjudication
-workflow, externally enforced access boundary, and one-shot holdout procedure
-remain future work. These commands prepare evidence; they do not make the search
-system self-modify or promote a ranking configuration.
+expanded rubric, double-review comparison/adjudication workflow, and aggregate-only
+validation evaluator are implemented. The task-inventory protocol is ready for a
+human-curated pilot, but no human-reviewed task set or labels are checked in.
+Externally enforced access isolation and a one-shot holdout procedure remain future
+work. These commands prepare evidence; they do not make the search system
+self-modify or promote a ranking configuration.

@@ -301,10 +301,13 @@ _JUDGMENT_DIMENSIONS = {
 }
 
 
-def build_judgment_template(pool_path: Path, *, split: str) -> dict[str, Any]:
+def build_judgment_template(pool_path: Path, *, split: str, reviewer_id: str) -> dict[str, Any]:
     pool, raw = _read_pool(pool_path)
     if split not in SPLITS:
         raise DiscoveryPoolError(f"split must be one of {', '.join(SPLITS)}")
+    reviewer_id = " ".join(reviewer_id.split()) if isinstance(reviewer_id, str) else ""
+    if not reviewer_id or len(reviewer_id) > 120:
+        raise DiscoveryPoolError("reviewer_id must be a non-empty private reviewer code of at most 120 characters")
     cases = [case for case in pool["cases"] if case.get("split") == split]
     if not cases:
         raise DiscoveryPoolError(f"candidate pool has no cases assigned to {split}")
@@ -314,6 +317,7 @@ def build_judgment_template(pool_path: Path, *, split: str) -> dict[str, Any]:
         "pool_sha256": _sha256(raw),
         "rubric_version": RUBRIC_VERSION,
         "split": split,
+        "reviewer_id": reviewer_id,
         "judgments": [
             {"case_id": case["case_id"], "candidate_judgments": [
                 {"candidate_id": candidate["id"], **{
@@ -327,6 +331,162 @@ def build_judgment_template(pool_path: Path, *, split: str) -> dict[str, Any]:
     }
 
 
+def compare_reviews(pool_path: Path, first_path: Path, second_path: Path) -> dict[str, Any]:
+    """Compare two independent, complete review files without resolving disagreements."""
+    first, first_raw = _read_review(first_path)
+    second, second_raw = _read_review(second_path)
+    pool, pool_raw = _read_pool(pool_path)
+    for key in ("pool_id", "pool_sha256", "rubric_version", "split"):
+        if first[key] != second[key]:
+            raise DiscoveryPoolError(f"independent reviews disagree on {key}")
+    if first["reviewer_id"] == second["reviewer_id"]:
+        raise DiscoveryPoolError("double review requires two distinct reviewer_id values")
+    if first["pool_id"] != pool["pool_id"] or first["pool_sha256"] != _sha256(pool_raw):
+        raise DiscoveryPoolError("reviews do not match the exact candidate-pool bytes")
+    expected_cases = [case for case in pool["cases"] if case.get("split") == first["split"]]
+    expected_labels = {
+        (case["case_id"], candidate["id"], dimension)
+        for case in expected_cases
+        for candidate in case["candidates"]
+        for dimension in _JUDGMENT_DIMENSIONS
+    }
+    left = _flatten_review(first)
+    right = _flatten_review(second)
+    if left.keys() != expected_labels or right.keys() != expected_labels:
+        raise DiscoveryPoolError("each independent review must cover every candidate and dimension in the fixed pool split")
+    if any(value == "unjudged" for (case_id, candidate_id, dimension), value in left.items() if dimension == "relevance"):
+        raise DiscoveryPoolError("each reviewer must complete relevance labels before comparison")
+    agreements = []
+    disagreements = []
+    for key in sorted(left):
+        case_id, candidate_id, dimension = key
+        record = {
+            "case_id": case_id,
+            "candidate_id": candidate_id,
+            "dimension": dimension,
+            "first": left[key],
+            "second": right[key],
+        }
+        (agreements if left[key] == right[key] else disagreements).append(record)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "pool_id": first["pool_id"],
+        "pool_sha256": first["pool_sha256"],
+        "rubric_version": first["rubric_version"],
+        "split": first["split"],
+        "reviewers": [first["reviewer_id"], second["reviewer_id"]],
+        "review_sha256s": [_sha256(first_raw), _sha256(second_raw)],
+        "agreement_count": len(agreements),
+        "disagreement_count": len(disagreements),
+        "agreements": agreements,
+        "disagreements": disagreements,
+        "decisions": [
+            {"case_id": item["case_id"], "candidate_id": item["candidate_id"], "dimension": item["dimension"], "decision": "unresolved"}
+            for item in disagreements
+        ],
+    }
+
+
+def adjudicate_reviews(pool_path: Path, first_path: Path, second_path: Path, adjudication_path: Path, *, adjudicator_id: str) -> dict[str, Any]:
+    """Apply explicit adjudicator choices to every disagreement, preserving both source reviews."""
+    comparison = compare_reviews(pool_path, first_path, second_path)
+    adjudication = _read_json_artifact(adjudication_path, "adjudication")
+    reviewer_ids = comparison["reviewers"]
+    reviewer_id = " ".join(adjudicator_id.split()) if isinstance(adjudicator_id, str) else ""
+    if not reviewer_id or len(reviewer_id) > 120 or reviewer_id in reviewer_ids:
+        raise DiscoveryPoolError("adjudicator_id must be a distinct, non-empty private reviewer code")
+    expected = {"schema_version", "pool_id", "pool_sha256", "rubric_version", "split", "reviewers", "review_sha256s", "agreement_count", "disagreement_count", "agreements", "disagreements", "decisions"}
+    if set(adjudication) != expected or any(adjudication.get(key) != comparison[key] for key in expected - {"decisions"}):
+        raise DiscoveryPoolError("adjudication artifact does not match the current independent reviews")
+    decisions = adjudication.get("decisions")
+    disputed = {(item["case_id"], item["candidate_id"], item["dimension"]): item for item in comparison["disagreements"]}
+    if not isinstance(decisions, list) or len(decisions) != len(disputed):
+        raise DiscoveryPoolError("adjudication must explicitly resolve every disagreement exactly once")
+    resolved: dict[tuple[str, str, str], str] = {}
+    for item in decisions:
+        if not isinstance(item, dict) or set(item) != {"case_id", "candidate_id", "dimension", "decision"}:
+            raise DiscoveryPoolError("each adjudication decision needs case_id, candidate_id, dimension, and decision")
+        if not all(isinstance(item[field], str) for field in ("case_id", "candidate_id", "dimension", "decision")):
+            raise DiscoveryPoolError("adjudication decision fields must be strings")
+        key = (item["case_id"], item["candidate_id"], item["dimension"])
+        original = disputed.get(key)
+        if original is None or key in resolved:
+            raise DiscoveryPoolError("adjudication contains an extra or duplicate decision")
+        if item["decision"] == "unresolved":
+            raise DiscoveryPoolError("adjudication must explicitly resolve every disagreement")
+        if item["decision"] not in _JUDGMENT_DIMENSIONS[ item["dimension"] ] - {"unjudged", "unassessed"}:
+            raise DiscoveryPoolError(f"adjudication decision is not a completed {item['dimension']} value")
+        resolved[key] = item["decision"]
+    first, _ = _read_review(first_path)
+    labels = _flatten_review(first)
+    for key, decision in resolved.items():
+        labels[key] = decision
+    judgments = deepcopy(first)
+    for case in judgments["judgments"]:
+        for candidate in case["candidate_judgments"]:
+            for dimension in _JUDGMENT_DIMENSIONS:
+                candidate[dimension] = labels[(case["case_id"], candidate["candidate_id"], dimension)]
+    judgments.pop("reviewer_id", None)
+    judgments["review_provenance"] = {
+        "reviewers": reviewer_ids,
+        "adjudicator_id": reviewer_id,
+        "review_sha256s": comparison["review_sha256s"],
+        "adjudication_sha256": _sha256(adjudication_path.read_bytes()),
+        "disagreements": comparison["disagreements"],
+        "decisions": decisions,
+    }
+    return judgments
+
+
+def _read_json_artifact(path: Path, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DiscoveryPoolError(f"cannot read {label} JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise DiscoveryPoolError(f"{label} artifact must be a JSON object")
+    return value
+
+
+def _read_review(path: Path) -> tuple[dict[str, Any], bytes]:
+    raw = path.read_bytes()
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DiscoveryPoolError(f"invalid review JSON: {exc}") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != SCHEMA_VERSION:
+        raise DiscoveryPoolError("unsupported review schema")
+    required = {"schema_version", "pool_id", "pool_sha256", "rubric_version", "split", "reviewer_id", "judgments"}
+    if set(value) != required or not isinstance(value.get("reviewer_id"), str) or not value["reviewer_id"].strip():
+        raise DiscoveryPoolError("review artifact needs the supported schema and reviewer_id")
+    _flatten_review(value)
+    return value, raw
+
+
+def _flatten_review(review: dict[str, Any]) -> dict[tuple[str, str, str], str]:
+    flattened = {}
+    cases = review.get("judgments")
+    if not isinstance(cases, list):
+        raise DiscoveryPoolError("review judgments must be a list")
+    for case in cases:
+        if not isinstance(case, dict) or set(case) != {"case_id", "candidate_judgments"} or not isinstance(case.get("case_id"), str):
+            raise DiscoveryPoolError("review case records must contain case_id and candidate_judgments")
+        if not isinstance(case["candidate_judgments"], list):
+            raise DiscoveryPoolError(f"{case['case_id']}: candidate_judgments must be a list")
+        for candidate in case["candidate_judgments"]:
+            expected = {"candidate_id", *_JUDGMENT_DIMENSIONS}
+            if not isinstance(candidate, dict) or set(candidate) != expected or not isinstance(candidate.get("candidate_id"), str):
+                raise DiscoveryPoolError(f"{case['case_id']}: malformed candidate judgment")
+            for dimension, values in _JUDGMENT_DIMENSIONS.items():
+                label = candidate[dimension]
+                if not isinstance(label, str) or label not in values:
+                    raise DiscoveryPoolError(f"{case['case_id']}/{candidate['candidate_id']}: invalid {dimension}")
+                flattened[(case["case_id"], candidate["candidate_id"], dimension)] = label
+    if len(flattened) != sum(len(case["candidate_judgments"]) * len(_JUDGMENT_DIMENSIONS) for case in cases):
+        raise DiscoveryPoolError("review contains duplicate case/candidate/dimension labels")
+    return flattened
+
+
 def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> dict[str, Any]:
     pool, raw = _read_pool(pool_path)
     if split not in SPLITS:
@@ -338,7 +498,8 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
         raise DiscoveryPoolError(f"cannot read judgment JSON: {exc}") from exc
     if not isinstance(judgments, dict) or judgments.get("schema_version") != SCHEMA_VERSION:
         raise DiscoveryPoolError("unsupported judgment schema")
-    if set(judgments) != {"schema_version", "pool_id", "pool_sha256", "rubric_version", "split", "judgments"}:
+    allowed_keys = {"schema_version", "pool_id", "pool_sha256", "rubric_version", "split", "judgments", "reviewer_id", "review_provenance"}
+    if not {"schema_version", "pool_id", "pool_sha256", "rubric_version", "split", "judgments"}.issubset(judgments) or set(judgments) - allowed_keys:
         raise DiscoveryPoolError("judgment artifact contains unsupported fields")
     if judgments.get("pool_id") != pool["pool_id"] or judgments.get("pool_sha256") != _sha256(raw):
         raise DiscoveryPoolError("judgments do not match the exact candidate-pool bytes")
@@ -346,9 +507,70 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
         raise DiscoveryPoolError(f"rubric_version must be {RUBRIC_VERSION}")
     if judgments.get("split") != split:
         raise DiscoveryPoolError("requested split does not match judgment artifact")
+    if "reviewer_id" in judgments and (not isinstance(judgments["reviewer_id"], str) or not judgments["reviewer_id"].strip()):
+        raise DiscoveryPoolError("reviewer_id must be a non-empty private reviewer code")
+    provenance = judgments.get("review_provenance")
+    if provenance is not None:
+        required_provenance = {"reviewers", "adjudicator_id", "review_sha256s", "adjudication_sha256", "disagreements", "decisions"}
+        if not isinstance(provenance, dict) or set(provenance) != required_provenance:
+            raise DiscoveryPoolError("review_provenance has an unsupported schema")
+        reviewers = provenance["reviewers"]
+        hashes = provenance["review_sha256s"]
+        if (
+            not isinstance(reviewers, list) or len(reviewers) != 2
+            or not all(isinstance(item, str) and item.strip() for item in reviewers)
+            or len(set(reviewers)) != 2
+            or not isinstance(provenance["adjudicator_id"], str)
+            or not provenance["adjudicator_id"].strip()
+            or provenance["adjudicator_id"] in reviewers
+            or not isinstance(hashes, list) or len(hashes) != 2
+            or not all(isinstance(item, str) and re.fullmatch(r"[a-f0-9]{64}", item) for item in hashes)
+            or not isinstance(provenance["adjudication_sha256"], str)
+            or not re.fullmatch(r"[a-f0-9]{64}", provenance["adjudication_sha256"])
+            or not isinstance(provenance["disagreements"], list)
+            or not isinstance(provenance["decisions"], list)
+            or len(provenance["disagreements"]) != len(provenance["decisions"])
+        ):
+            raise DiscoveryPoolError("review_provenance values are invalid")
+        expected_decisions = {}
+        for disagreement in provenance["disagreements"]:
+            if not isinstance(disagreement, dict) or set(disagreement) != {"case_id", "candidate_id", "dimension", "first", "second"}:
+                raise DiscoveryPoolError("review_provenance contains a malformed disagreement")
+            dimension = disagreement["dimension"]
+            if (
+                not isinstance(dimension, str) or dimension not in _JUDGMENT_DIMENSIONS
+                or not isinstance(disagreement["first"], str)
+                or not isinstance(disagreement["second"], str)
+                or disagreement["first"] not in _JUDGMENT_DIMENSIONS[dimension]
+                or disagreement["second"] not in _JUDGMENT_DIMENSIONS[dimension]
+                or disagreement["first"] == disagreement["second"]
+            ):
+                raise DiscoveryPoolError("review_provenance disagreement labels are invalid")
+            expected_decisions[(disagreement["case_id"], disagreement["candidate_id"], dimension)] = None
+        for decision in provenance["decisions"]:
+            if not isinstance(decision, dict) or set(decision) != {"case_id", "candidate_id", "dimension", "decision"}:
+                raise DiscoveryPoolError("review_provenance contains a malformed decision")
+            key = (decision["case_id"], decision["candidate_id"], decision["dimension"])
+            dimension = decision["dimension"]
+            if (
+                key not in expected_decisions or expected_decisions[key] is not None
+                or not isinstance(dimension, str) or not isinstance(decision["decision"], str)
+                or decision["decision"] not in _JUDGMENT_DIMENSIONS.get(dimension, set()) - {"unjudged", "unassessed"}
+            ):
+                raise DiscoveryPoolError("review_provenance decisions do not resolve its disagreements")
+            expected_decisions[key] = decision["decision"]
+        if any(value is None for value in expected_decisions.values()):
+            raise DiscoveryPoolError("review_provenance has an unresolved disagreement")
     pool_cases = [case for case in pool["cases"] if case.get("split") == split]
     if not pool_cases:
         raise DiscoveryPoolError(f"candidate pool has no cases assigned to {split}")
+    if provenance is not None:
+        valid_review_keys = {
+            (case["case_id"], candidate["id"], dimension)
+            for case in pool_cases for candidate in case["candidates"] for dimension in _JUDGMENT_DIMENSIONS
+        }
+        if any((item["case_id"], item["candidate_id"], item["dimension"]) not in valid_review_keys for item in provenance["disagreements"]):
+            raise DiscoveryPoolError("review_provenance refers to an item outside the fixed pool split")
     cases = judgments.get("judgments")
     if not isinstance(cases, list) or len(cases) != len(pool_cases):
         raise DiscoveryPoolError("judgments must contain exactly one record per case")
@@ -365,6 +587,10 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
         raise DiscoveryPoolError("judgment case IDs do not match the requested pool split")
 
     dev_cases = []
+    adjudicated_values = {
+        (decision["case_id"], decision["candidate_id"], decision["dimension"]): decision["decision"]
+        for decision in (provenance["decisions"] if provenance is not None else [])
+    }
     for case in pool_cases:
         item = judgment_by_case[case["case_id"]]
         raw_labels = item.get("candidate_judgments")
@@ -384,6 +610,9 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
             for dimension, values in _JUDGMENT_DIMENSIONS.items():
                 if not isinstance(dimensions[dimension], str) or dimensions[dimension] not in values:
                     raise DiscoveryPoolError(f"{case['case_id']}/{candidate_id}: invalid {dimension}")
+                adjudicated = adjudicated_values.get((case["case_id"], candidate_id, dimension))
+                if adjudicated is not None and dimensions[dimension] != adjudicated:
+                    raise DiscoveryPoolError(f"{case['case_id']}/{candidate_id}: judgment does not match adjudication")
             by_id[candidate_id] = dimensions
         candidate_ids = {candidate["id"] for candidate in case["candidates"]}
         if set(by_id) != candidate_ids:
@@ -405,6 +634,7 @@ def prepare_rank_pool(pool_path: Path, judgments_path: Path, *, split: str) -> d
         "source_pool_sha256": _sha256(raw),
         "candidate_inventory_sha256": candidate_inventory_fingerprint(pool_cases),
         "judgment_sha256": _sha256(judgment_bytes),
+        "review_provenance": judgments.get("review_provenance"),
         "rubric_version": RUBRIC_VERSION,
         "split": split,
         "cases": dev_cases,
