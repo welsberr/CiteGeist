@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -349,8 +350,41 @@ def run_validation_paths(
         registration_bytes=registration_bytes,
         k=k,
     )
+    _claim_validation_once(validation_path, registration, validation_bytes, registration_bytes)
     try:
         write_private_json(output_path, result)
     except DiscoveryPoolError as exc:
         raise ValidationExperimentError(str(exc)) from exc
     return result, output_path
+
+
+def _claim_validation_once(
+    validation_path: Path,
+    registration: dict[str, Any],
+    validation_bytes: bytes,
+    registration_bytes: bytes,
+) -> Path:
+    """Persist a pool-scoped one-shot claim independent of receipt location."""
+    marker = validation_path.resolve().parent / f".validation-{registration['validation_pool_id']}.consumed.json"
+    content = {
+        "schema_version": 1,
+        "registration_id": registration["registration_id"],
+        "validation_pool_id": registration["validation_pool_id"],
+        "registration_sha256": _sha256(registration_bytes),
+        "validation_pool_sha256": _sha256(validation_bytes),
+    }
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(marker, flags, 0o600)
+    except FileExistsError as exc:
+        raise ValidationExperimentError(
+            f"validation registration already consumed for task set {registration['validation_pool_id']}"
+        ) from exc
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(content, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    return marker

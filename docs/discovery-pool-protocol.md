@@ -117,13 +117,14 @@ inventory, and minimum effect before labels are prepared. The validation evaluat
 accepts only that registration and a validation-split pool,
 checks the declared precision threshold plus selected-result identity, version,
 provenance, and graded relevance, then writes aggregate metrics without
-query-level results. In one
-output directory it refuses a second evaluation of the same task-set ID. A result
-may justify a separately reviewed holdout proposal; it does not change defaults.
-This is an operator workflow, not an OS-level security boundary. The maintainer
-must keep validation files unreadable to proposal agents and register the finalist
-before opening labels. A process with the same file access can bypass this
-convention or use another output directory.
+query-level results. A private consumption marker beside the validation pool
+refuses a second evaluation of that pool even if a different receipt output
+directory or registration copy is used. A result may justify a separately reviewed
+holdout proposal; it does not change defaults. This is an operator workflow, not
+an OS-level security boundary. The maintainer must keep validation files and the
+marker directory unreadable to proposal agents and register the finalist before
+opening labels. A process with the same file access can bypass this convention by
+copying the pool or removing the marker.
 
 The recorder, task-set assembler, local-corpus fingerprint, split-bound judgments,
 expanded rubric, double-review comparison/adjudication workflow, and aggregate-only

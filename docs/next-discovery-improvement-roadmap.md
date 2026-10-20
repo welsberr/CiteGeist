@@ -169,9 +169,11 @@ finalist, baseline, exact unlabelled validation-pool hash and candidate inventor
 and minimum useful precision gain. `validate-rank` accepts one registration and
 validation-split pool, verifies the fixed candidate inventory plus selected-result
 identity, version, graded relevance, and provenance, and emits aggregate-only
-results. It refuses a second receipt for the same task-set ID in the same output
-directory. This is not an OS-level isolation boundary: an agent with the same
-filesystem access can read labels or use another output directory.
+results. It writes a private consumption marker beside the validation pool, so
+changing the receipt output directory or copying the registration file does not
+permit a second evaluation of that pool at its protected path. This is not an
+OS-level isolation boundary: an agent with the same filesystem access can copy
+the pool and remove the marker.
 The controlled account/mount setup and access-failure tests remain prerequisites
 before N3 can pass its exit condition or be treated as confirmatory validation.
 

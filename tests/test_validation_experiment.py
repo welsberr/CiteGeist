@@ -95,6 +95,16 @@ def test_registers_one_finalist_before_aggregate_only_validation(tmp_path):
     assert "ranked_ids" not in output_path.read_text(encoding="utf-8")
     with pytest.raises(ValidationExperimentError, match="already evaluated"):
         run_validation_paths(validation_path, registration_path, tmp_path / "validation-receipts", k=1)
+    with pytest.raises(ValidationExperimentError, match="registration already consumed"):
+        run_validation_paths(validation_path, registration_path, tmp_path / "alternate-receipts", k=1)
+    marker = registration_path.parent / f".validation-{receipt['validation_pool_id']}.consumed.json"
+    assert marker.exists()
+    assert marker.stat().st_mode & 0o777 == 0o600
+    copied_registration = tmp_path / "other-registration-dir" / "registration.json"
+    copied_registration.parent.mkdir()
+    copied_registration.write_bytes(registration_path.read_bytes())
+    with pytest.raises(ValidationExperimentError, match="registration already consumed"):
+        run_validation_paths(validation_path, copied_registration, tmp_path / "copied-registration-receipts", k=1)
 
 
 def test_validation_requires_matching_pool_and_predeclared_finalist(tmp_path):
