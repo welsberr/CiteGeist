@@ -36,8 +36,9 @@ and uncertainty notes.
 
 The maintainer owns objectives, benchmark labels, evaluator code, and adoption
 decisions. A ranking-proposal agent may inspect an approved development pool and
-submit JSON weight configurations to `citegeist experiment-rank`. The runner accepts
-only allowlisted numeric weights and is read-only with respect to the database and
+submit JSON ranking configurations to `citegeist experiment-rank`. The runner accepts
+only allowlisted numeric ranking settings (weights and an optional bounded
+abstention threshold) and is read-only with respect to the database and
 external sources. It writes a new provenance receipt to the requested private path.
 
 The proposal agent must not edit the candidate pool, labels, evaluator, source
@@ -47,7 +48,7 @@ through `citegeist sandbox-proposal`, which exposes a sanitized development pool
 one proposal output file inside a network-disabled bubblewrap namespace. It strips
 inherited environment variables and does not mount the home directory, repository,
 database, validation files, or holdout files. The process may propose numeric JSON
-weights only; the trusted maintainer runs the evaluator and controls adoption.
+ranking settings only; the trusted maintainer runs the evaluator and controls adoption.
 
 This boundary applies to that child process. It does not constrain an AI tool whose
 orchestrator runs outside the namespace, and it is not a substitute for separate OS

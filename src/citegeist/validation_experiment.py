@@ -106,8 +106,8 @@ def register_validation(
         "validation_source_pool_sha256": _sha256(validation_source_bytes),
         "validation_candidate_inventory_sha256": candidate_inventory_fingerprint(validation_cases),
         "development_receipt_sha256": _sha256(raw),
-        "baseline": {"config_id": "baseline", "weights": baseline["weights"]},
-        "finalist": {"config_id": finalist_id, "weights": finalist["weights"]},
+        "baseline": {"config_id": "baseline", "weights": baseline["weights"], "abstain_below": baseline.get("abstain_below", 0.0)},
+        "finalist": {"config_id": finalist_id, "weights": finalist["weights"], "abstain_below": finalist.get("abstain_below", 0.0)},
         "minimum_precision_gain": float(minimum_precision_gain),
     }
     body["registration_id"] = f"registration-{_sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode())[:20]}"
@@ -170,15 +170,17 @@ def evaluate_validation(
     baseline = registration["baseline"]
     finalist = registration["finalist"]
     for config_name, config in (("baseline", baseline), ("finalist", finalist)):
-        _require(set(config) == {"config_id", "weights"}, f"registered {config_name} config is malformed")
+        _require(set(config) in ({"config_id", "weights"}, {"config_id", "weights", "abstain_below"}), f"registered {config_name} config is malformed")
         _require(isinstance(config.get("config_id"), str) and config["config_id"], f"registered {config_name} config ID is required")
+        if "abstain_below" not in config:
+            config["abstain_below"] = 0.0
     _require(baseline["config_id"] == "baseline", "registered baseline ID must be 'baseline'")
     _require(finalist["config_id"] != "baseline", "finalist must differ from baseline")
     proposal_wrapper = {
         "schema_version": 1,
         "proposals": [
-            {"id": "baseline", "parent_id": None, "rationale": "Registered validation baseline", "weights": baseline["weights"]},
-            {"id": finalist["config_id"], "parent_id": "baseline", "rationale": "Pre-registered development finalist", "weights": finalist["weights"]},
+            {"id": "baseline", "parent_id": None, "rationale": "Registered validation baseline", "weights": baseline["weights"], "abstain_below": baseline["abstain_below"]},
+            {"id": finalist["config_id"], "parent_id": "baseline", "rationale": "Pre-registered development finalist", "weights": finalist["weights"], "abstain_below": finalist["abstain_below"]},
         ],
     }
     try:
@@ -187,9 +189,14 @@ def evaluate_validation(
     except RankingExperimentError as exc:
         raise ValidationExperimentError(f"registered ranking config is invalid: {exc}") from exc
     weights_by_id = {item["id"]: item["weights"] for item in configs}
+    abstain_by_id = {item["id"]: item["abstain_below"] for item in configs}
     weights = {
         "baseline": weights_by_id[baseline["config_id"]],
         "finalist": weights_by_id[finalist["config_id"]],
+    }
+    abstain_thresholds = {
+        "baseline": abstain_by_id[baseline["config_id"]],
+        "finalist": abstain_by_id[finalist["config_id"]],
     }
 
     case_count = 0
@@ -202,6 +209,8 @@ def evaluate_validation(
     empty_relevance_top_k_returns = {"baseline": 0, "finalist": 0}
     answerability_case_counts = {"answerable": 0, "unanswerable": 0, "uncertain": 0, "unassessed": 0}
     unanswerable_top_k_returns = {"baseline": 0, "finalist": 0}
+    answerable_abstentions = {"baseline": 0, "finalist": 0}
+    abstained_cases = {"baseline": 0, "finalist": 0}
     selected_count = 0
     identity_bad = 0
     identity_unassessed = 0
@@ -222,9 +231,16 @@ def evaluate_validation(
         answerability_case_counts[answerability] += 1
         case_scores: dict[str, float] = {}
         ranked_by_config: dict[str, list[str]] = {}
+        full_ranked_by_config: dict[str, list[str]] = {}
         for config_name in ("baseline", "finalist"):
-            ranked_records = _rank_case(case, weights[config_name])
+            full_ranked = _rank_case(case, weights[config_name])
+            full_ranked_by_config[config_name] = [candidate["id"] for candidate in full_ranked]
+            ranked_records = _rank_case(case, weights[config_name], abstain_below=abstain_thresholds[config_name])
             ranked_ids = [candidate["id"] for candidate in ranked_records]
+            was_abstained = bool(full_ranked) and not ranked_records
+            abstained_cases[config_name] += was_abstained
+            if answerability == "answerable" and was_abstained:
+                answerable_abstentions[config_name] += 1
             ranked_by_config[config_name] = ranked_ids
             scored = _score_case(case["relevant_ids"], ranked_records, k)
             precision[config_name].append(scored["precision_at_k"])
@@ -257,7 +273,12 @@ def evaluate_validation(
                 providers.update(candidate_by_id[candidate_id].get("provider_ranks", {}))
                 for provider in providers or {"unknown"}:
                     source_providers[config_name][provider] = source_providers[config_name].get(provider, 0) + 1
-        if len(ranked) != len(set(ranked)) or set(ranked) != expected_ids:
+        # Abstention changes the returned ranking, not the fixed candidate inventory.
+        if any(
+            len(full_ranked_by_config[name]) != len(expected_ids)
+            or set(full_ranked_by_config[name]) != expected_ids
+            for name in ("baseline", "finalist")
+        ):
             fixed_candidate_sets = False
         judgments = case.get("quality_judgments", {})
         grades: list[str] = []
@@ -312,6 +333,7 @@ def evaluate_validation(
         "selected_candidates_have_provenance": provenance_missing == 0,
         "selected_identity_correct": identity_bad == 0 and identity_unassessed == 0,
         "selected_version_match_or_not_applicable": version_bad == 0 and version_unassessed == 0,
+        "answerable_abstentions_not_increased": answerable_abstentions["finalist"] <= answerable_abstentions["baseline"],
     }
     passed = all(checks.values()) and precision_gain >= registration["minimum_precision_gain"]
     return {
@@ -335,6 +357,9 @@ def evaluate_validation(
             "empty_relevance_top_k_returns": empty_relevance_top_k_returns,
             "answerability_case_counts": answerability_case_counts,
             "unanswerable_top_k_returns": unanswerable_top_k_returns,
+            "answerable_abstentions": answerable_abstentions,
+            "abstained_cases": abstained_cases,
+            "abstain_below": abstain_thresholds,
             "finalist_top_k_count": selected_count,
             "selected_identity_errors": identity_bad,
             "selected_identity_unassessed_or_uncertain": identity_unassessed,
@@ -428,6 +453,7 @@ def register_holdout(
     maximum_source_coverage_loss: int = 0,
     maximum_unanswerable_false_positive_regression: int = 0,
     maximum_unanswerable_false_positives: int = 0,
+    maximum_answerable_abstentions: int = 0,
 ) -> dict[str, Any]:
     """Freeze a holdout comparison only after the registered finalist passed validation."""
     receipt, receipt_bytes = _load_json(validation_receipt_path)
@@ -490,6 +516,12 @@ def register_holdout(
         "maximum_unanswerable_false_positives must be from zero to the number of holdout cases",
     )
     _require(
+        isinstance(maximum_answerable_abstentions, int)
+        and not isinstance(maximum_answerable_abstentions, bool)
+        and 0 <= maximum_answerable_abstentions <= len(holdout_cases),
+        "maximum_answerable_abstentions must be from zero to the number of holdout cases",
+    )
+    _require(
         isinstance(maximum_source_coverage_loss, int)
         and not isinstance(maximum_source_coverage_loss, bool)
         and 0 <= maximum_source_coverage_loss <= len({
@@ -515,6 +547,7 @@ def register_holdout(
         "maximum_empty_relevance_regression": maximum_empty_relevance_regression,
         "maximum_unanswerable_false_positive_regression": maximum_unanswerable_false_positive_regression,
         "maximum_unanswerable_false_positives": maximum_unanswerable_false_positives,
+        "maximum_answerable_abstentions": maximum_answerable_abstentions,
         "maximum_source_coverage_loss": maximum_source_coverage_loss,
     }
     body["registration_id"] = f"registration-{_sha256(json.dumps(body, sort_keys=True, separators=(',', ':')).encode())[:20]}"
@@ -529,6 +562,7 @@ def _validate_holdout_registration(registration: Any) -> dict[str, Any]:
         "baseline", "finalist", "minimum_precision_gain", "maximum_recall_loss",
         "maximum_empty_relevance_regression", "maximum_source_coverage_loss",
         "maximum_unanswerable_false_positive_regression", "maximum_unanswerable_false_positives", "registration_id",
+        "maximum_answerable_abstentions",
     }
     _require(set(registration) == fields, "holdout registration contains missing or unsupported fields")
     _require(registration.get("schema_version") == 1, "unsupported holdout registration schema")
@@ -562,6 +596,11 @@ def _validate_holdout_registration(registration: Any) -> dict[str, Any]:
         and not isinstance(unanswerable_false_positives, bool)
         and unanswerable_false_positives >= 0,
         "invalid maximum_unanswerable_false_positives",
+    )
+    answerable_abstentions = registration.get("maximum_answerable_abstentions")
+    _require(
+        isinstance(answerable_abstentions, int) and not isinstance(answerable_abstentions, bool) and answerable_abstentions >= 0,
+        "invalid maximum_answerable_abstentions",
     )
     coverage_loss = registration.get("maximum_source_coverage_loss")
     _require(isinstance(coverage_loss, int) and not isinstance(coverage_loss, bool) and coverage_loss >= 0, "invalid maximum_source_coverage_loss")
@@ -643,6 +682,9 @@ def evaluate_holdout(
         "unanswerable_false_positives_within_tolerance": (
             unanswerable_counts["finalist"] <= registration["maximum_unanswerable_false_positives"]
         ),
+        "answerable_abstentions_within_tolerance": (
+            aggregate["answerable_abstentions"]["finalist"] <= registration["maximum_answerable_abstentions"]
+        ),
         "source_coverage_within_tolerance": source_coverage_loss <= registration["maximum_source_coverage_loss"],
     }
     passed = (
@@ -667,6 +709,7 @@ def evaluate_holdout(
             "maximum_empty_relevance_regression": registration["maximum_empty_relevance_regression"],
             "maximum_unanswerable_false_positive_regression": registration["maximum_unanswerable_false_positive_regression"],
             "maximum_unanswerable_false_positives": registration["maximum_unanswerable_false_positives"],
+            "maximum_answerable_abstentions": registration["maximum_answerable_abstentions"],
             "maximum_source_coverage_loss": registration["maximum_source_coverage_loss"],
         },
         "critical_checks": holdout_checks,

@@ -51,7 +51,8 @@ near-term priorities from the [discovery and improvement roadmap](discovery-rese
 2. The proposal agent may read only an approved development pool and may write only
    proposal JSON and a private development receipt. It cannot execute candidate code.
 3. Candidate IDs and the candidate set come from the recorded pool; proposals may
-   change only the allowlisted numeric weights and their rationale/lineage.
+   change only allowlisted numeric weights, the bounded abstention threshold,
+   and their rationale/lineage.
 4. Keep validation labels outside the proposal loop. A finalist receives one
    maintainer-controlled comparison, with aggregate results only.
 5. Keep locked release labels separate until a one-shot release evaluation. Do not

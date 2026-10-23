@@ -14,6 +14,7 @@ def _pool(pool_id="dev"):
         "cases": [
             {
                 "case_id": f"{pool_id}-case-1",
+                "answerability": "answerable",
                 "query": "marine echolocation",
                 "seed_texts": ["dolphin echolocation navigation"],
                 "relevant_ids": ["relevant"],
@@ -34,9 +35,15 @@ def _pool(pool_id="dev"):
             },
             {
                 "case_id": f"{pool_id}-case-2",
+                "answerability": "unanswerable",
                 "query": "unanswerable question",
                 "relevant_ids": [],
-                "candidates": [],
+                "candidates": [{
+                    "id": "irrelevant",
+                    "fields": {"title": "Cabbage pollen catalog"},
+                    "providers": ["crossref"],
+                    "provider_ranks": {"crossref": 1},
+                }],
             },
         ],
     }
@@ -74,6 +81,40 @@ def test_experiment_selects_better_development_proposal_without_promotion():
     assert receipt["selection"]["locked_holdout_used"] is False
     assert receipt["budget"]["network_calls"] == 0
     assert receipt["budget"]["database_writes"] == 0
+
+
+def test_abstention_can_improve_unanswerable_cases_without_answerable_abstentions():
+    pool = _pool()
+    proposals = _proposals()
+    proposals["proposals"].append({
+        "id": "seed-with-abstention",
+        "rationale": "Suppress candidates with no query or seed evidence",
+        "weights": {"seed_overlap": 1},
+        "abstain_below": 0.1,
+    })
+    receipt = run_ranking_experiment(
+        pool,
+        proposals,
+        development_bytes=json.dumps(pool, sort_keys=True).encode(),
+        proposal_bytes=json.dumps(proposals, sort_keys=True).encode(),
+        repo=Path(__file__).resolve().parents[1],
+        k=1,
+    )
+    assert receipt["selection"]["development_finalist_id"] == "seed-with-abstention"
+    finalist = next(item for item in receipt["development_results"] if item["proposal_id"] == "seed-with-abstention")
+    assert finalist["evaluation"]["unanswerable_false_positives"] == 0
+    assert finalist["evaluation"]["answerable_abstentions"] == 0
+    assert receipt["selection"]["recommendation"] == "research_candidate"
+
+
+def test_abstention_threshold_must_be_bounded():
+    proposals = _proposals()
+    proposals["proposals"][1]["abstain_below"] = 1.1
+    with pytest.raises(RankingExperimentError, match="abstain_below"):
+        run_ranking_experiment(
+            _pool(), proposals, development_bytes=b"pool", proposal_bytes=b"proposal",
+            repo=Path.cwd(), k=1,
+        )
 
 
 def test_proposals_reject_executable_fields():

@@ -173,7 +173,8 @@ does not stop unrelated eligible work, and the overall result remains honestly p
 
 **C5a — bounded development proposals (implemented).** `citegeist experiment-rank`
 accepts a fixed recorded candidate pool and at most 16 JSON ranking configurations.
-Only allowlisted numeric weights are interpreted; proposals cannot supply candidate
+Only allowlisted numeric weights and a bounded `abstain_below` score threshold are
+interpreted; proposals cannot supply candidate
 IDs, executable code, evaluators, or labels. The runner uses no network or database,
 records input hashes and repository revision, caps cases and candidates, preserves
 all tried configurations in its receipt, and never promotes a result. Development

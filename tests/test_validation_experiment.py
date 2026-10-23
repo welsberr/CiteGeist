@@ -9,6 +9,7 @@ from citegeist.research_discovery import ResearchBrief
 from citegeist.ranking_experiment import run_ranking_experiment
 from citegeist.validation_experiment import (
     ValidationExperimentError,
+    evaluate_validation,
     register_holdout,
     register_validation,
     run_holdout_paths,
@@ -135,6 +136,7 @@ def test_registers_one_finalist_before_aggregate_only_validation(tmp_path):
         "selected_candidates_have_provenance": True,
         "selected_identity_correct": True,
         "selected_version_match_or_not_applicable": True,
+        "answerable_abstentions_not_increased": True,
     }
     assert "case_count" in receipt["aggregate"]
     assert receipt["aggregate"]["mean_graded_ndcg_at_k"]["finalist"] is not None
@@ -152,6 +154,36 @@ def test_registers_one_finalist_before_aggregate_only_validation(tmp_path):
     copied_registration.write_bytes(registration_path.read_bytes())
     with pytest.raises(ValidationExperimentError, match="registration already consumed"):
         run_validation_paths(validation_path, copied_registration, tmp_path / "copied-registration-receipts", k=1)
+
+
+def test_validation_applies_registered_abstention_threshold_and_blocks_answerable_loss(tmp_path):
+    development_receipt_path = _development_receipt(tmp_path)
+    validation_source, validation_path, _ = _validation_pool(tmp_path)
+    registration = register_validation(
+        development_receipt_path,
+        validation_pool_path=validation_source,
+        minimum_precision_gain=0.0,
+    )
+    registration["finalist"]["abstain_below"] = 0.99
+    core = {key: value for key, value in registration.items() if key != "registration_id"}
+    import hashlib
+
+    registration["registration_id"] = "registration-" + hashlib.sha256(
+        json.dumps(core, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:20]
+    validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    result = evaluate_validation(
+        validation,
+        registration,
+        validation_bytes=validation_path.read_bytes(),
+        registration_bytes=json.dumps(registration, sort_keys=True).encode(),
+        k=1,
+    )
+
+    assert result["aggregate"]["abstain_below"]["finalist"] == 0.99
+    assert result["aggregate"]["answerable_abstentions"]["finalist"] > 0
+    assert result["critical_checks"]["answerable_abstentions_not_increased"] is False
+    assert result["decision"] == "retain_baseline"
 
 
 def test_validation_requires_matching_pool_and_predeclared_finalist(tmp_path):
@@ -294,6 +326,7 @@ def test_one_shot_holdout_requires_passed_validation_and_freezes_tolerances(tmp_
         "maximum_empty_relevance_regression": 0,
         "maximum_unanswerable_false_positive_regression": 0,
         "maximum_unanswerable_false_positives": 0,
+        "maximum_answerable_abstentions": 0,
         "maximum_source_coverage_loss": 0,
     }
     assert "cases" not in result

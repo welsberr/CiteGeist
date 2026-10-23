@@ -103,7 +103,7 @@ def _validate_proposals(proposals: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for item in items:
         _require(isinstance(item, dict), "each proposal must be an object")
-        _require(set(item).issubset({"id", "parent_id", "weights", "rationale"}), "proposal contains unsupported fields; executable or ranking-control fields are forbidden")
+        _require(set(item).issubset({"id", "parent_id", "weights", "abstain_below", "rationale"}), "proposal contains unsupported fields; only allowlisted ranking settings are accepted")
         proposal_id = item.get("id")
         _require(isinstance(proposal_id, str) and proposal_id and len(proposal_id) <= 80, "each proposal needs an id of at most 80 characters")
         _require(proposal_id not in ids, f"duplicate proposal id {proposal_id!r}")
@@ -116,12 +116,26 @@ def _validate_proposals(proposals: Any) -> list[dict[str, Any]]:
             _require(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 1, f"{proposal_id}: {feature} weight must be finite and in [0, 1]")
             normalized_weights[feature] = float(value)
         _require(sum(normalized_weights.values()) > 0, f"{proposal_id}: at least one weight must be positive")
+        abstain_below = item.get("abstain_below", 0.0)
+        _require(
+            isinstance(abstain_below, (int, float))
+            and not isinstance(abstain_below, bool)
+            and math.isfinite(abstain_below)
+            and 0 <= abstain_below <= 1,
+            f"{proposal_id}: abstain_below must be finite and in [0, 1]",
+        )
         rationale = item.get("rationale", "")
         _require(isinstance(rationale, str) and rationale.strip() and len(rationale) <= 1000, f"{proposal_id}: rationale/hypothesis is required and must be at most 1000 characters")
         parent_id = item.get("parent_id", None if proposal_id == "baseline" else "baseline")
         _require(parent_id is None or isinstance(parent_id, str), f"{proposal_id}: parent_id must be a proposal ID or null")
         _require(parent_id != proposal_id, f"{proposal_id}: a proposal cannot be its own parent")
-        normalized.append({"id": proposal_id, "parent_id": parent_id, "weights": normalized_weights, "rationale": rationale})
+        normalized.append({
+            "id": proposal_id,
+            "parent_id": parent_id,
+            "weights": normalized_weights,
+            "abstain_below": float(abstain_below),
+            "rationale": rationale,
+        })
     _require("baseline" in ids, "proposals must include a configuration with id 'baseline'")
     _require(all(item["parent_id"] is None or item["parent_id"] in ids for item in normalized), "each parent_id must reference a proposal in this file")
     parents = {item["id"]: item["parent_id"] for item in normalized}
@@ -156,7 +170,12 @@ def _candidate_features(case: dict[str, Any], candidate: dict[str, Any], max_ran
     }
 
 
-def _rank_case(case: dict[str, Any], weights: dict[str, float]) -> list[dict[str, Any]]:
+def _rank_case(
+    case: dict[str, Any],
+    weights: dict[str, float],
+    *,
+    abstain_below: float = 0.0,
+) -> list[dict[str, Any]]:
     candidates = case["candidates"]
     max_rank = max((len(set(c.get("providers", [])) | set(c.get("provider_ranks", {}))) for c in candidates), default=0)
     denominator = sum(weights.values())
@@ -166,23 +185,49 @@ def _rank_case(case: dict[str, Any], weights: dict[str, float]) -> list[dict[str
         score = sum(weights[key] * features[key] for key in FEATURES) / denominator
         ranked.append((score, original_index, candidate))
     ranked.sort(key=lambda item: (-item[0], item[1], item[2]["id"]))
+    if ranked and ranked[0][0] < abstain_below:
+        return []
     return [item[2] for item in ranked]
 
 
-def _evaluate_config(cases: list[dict[str, Any]], weights: dict[str, float], k: int) -> dict[str, Any]:
+def _evaluate_config(
+    cases: list[dict[str, Any]],
+    weights: dict[str, float],
+    k: int,
+    *,
+    abstain_below: float = 0.0,
+) -> dict[str, Any]:
     per_case = []
+    unanswerable_case_count = 0
+    unanswerable_false_positives = 0
+    answerable_abstentions = 0
+    abstained_cases = 0
     for case in cases:
-        ranked = _rank_case(case, weights)
+        full_ranked = _rank_case(case, weights)
+        ranked = _rank_case(case, weights, abstain_below=abstain_below)
+        was_abstained = bool(full_ranked) and not ranked
+        abstained_cases += was_abstained
+        answerability = case.get("answerability", "unassessed")
+        if answerability == "unanswerable":
+            unanswerable_case_count += 1
+            unanswerable_false_positives += bool(ranked[:k])
+        if answerability == "answerable" and was_abstained:
+            answerable_abstentions += 1
         metrics = _score_case(case["relevant_ids"], ranked, k)
         per_case.append({
             "case_id": case["case_id"],
             "metrics": metrics,
             "ranked_ids": metrics["candidate_ids"],
+            "abstained": was_abstained,
         })
     precision_values = [item["metrics"]["precision_at_k"] for item in per_case]
     return {
         "case_count": len(per_case),
         "mean_precision_at_k": round(sum(precision_values) / len(precision_values), 6) if precision_values else 0.0,
+        "abstained_case_count": abstained_cases,
+        "answerable_abstentions": answerable_abstentions,
+        "unanswerable_cases": unanswerable_case_count,
+        "unanswerable_false_positives": unanswerable_false_positives,
         "cases": per_case,
     }
 
@@ -225,20 +270,41 @@ def run_ranking_experiment(
     baseline = next(item for item in configs if item["id"] == "baseline")
 
     development_results = [
-        {"proposal_id": item["id"], "parent_id": item["parent_id"], "rationale": item["rationale"], "weights": item["weights"],
-         "evaluation": _evaluate_config(development["cases"], item["weights"], k)}
+        {
+            "proposal_id": item["id"],
+            "parent_id": item["parent_id"],
+            "rationale": item["rationale"],
+            "weights": item["weights"],
+            "abstain_below": item["abstain_below"],
+            "evaluation": _evaluate_config(
+                development["cases"], item["weights"], k,
+                abstain_below=item["abstain_below"],
+            ),
+        }
         for item in configs
     ]
     baseline_dev = next(item for item in development_results if item["proposal_id"] == "baseline")
-    # Stable tie break: baseline wins ties; otherwise proposal ID order is fixed.
+    # Prefer precision, then fewer unanswerable false positives and fewer answerable
+    # abstentions. Baseline wins exact ties; proposal IDs break remaining ties.
     development_results.sort(key=lambda item: (
         -item["evaluation"]["mean_precision_at_k"],
+        item["evaluation"]["unanswerable_false_positives"],
+        item["evaluation"]["answerable_abstentions"],
         item["proposal_id"] != "baseline",
         item["proposal_id"],
     ))
     finalist = development_results[0]
     dev_gain = finalist["evaluation"]["mean_precision_at_k"] - baseline_dev["evaluation"]["mean_precision_at_k"]
-    recommendation = "research_candidate" if finalist["proposal_id"] != "baseline" and dev_gain > 0 else "retain_baseline"
+    no_answer_improved_without_answerable_regression = (
+        finalist["evaluation"]["unanswerable_false_positives"] < baseline_dev["evaluation"]["unanswerable_false_positives"]
+        and finalist["evaluation"]["answerable_abstentions"] <= baseline_dev["evaluation"]["answerable_abstentions"]
+    )
+    recommendation = (
+        "research_candidate"
+        if finalist["proposal_id"] != "baseline"
+        and (dev_gain > 0 or (dev_gain == 0 and no_answer_improved_without_answerable_regression))
+        else "retain_baseline"
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "experiment_type": "offline-ranking-configuration",

@@ -6,8 +6,11 @@ development candidate pool. It does not discover candidates, call models or
 providers, read a bibliography database, or change the default ranker.
 
 The proposal agent receives an approved development pool and may submit at most
-16 configurations. Each configuration contains a parent ID, short rationale, and
-weights for `lexical`, `seed_overlap`, `provider_rank`, and `source_coverage`. Candidate IDs,
+16 configurations. Each configuration contains a parent ID, short rationale,
+weights for `lexical`, `seed_overlap`, `provider_rank`, and `source_coverage`, and
+an optional `abstain_below` score threshold from 0 to 1 (default 0). The ranker
+returns no candidates when the best normalized score is below that threshold.
+Candidate IDs,
 labels, code, prompts, evaluator settings, and permissions cannot be supplied as
 proposal fields. Text features are derived deterministically from candidate title,
 abstract, keywords, query, seed text, provider identities, and provider ranks.
@@ -60,13 +63,15 @@ Example proposal file:
       "id": "baseline",
       "parent_id": null,
       "rationale": "Current lexical-first comparison.",
-      "weights": {"lexical": 1.0}
+      "weights": {"lexical": 1.0},
+      "abstain_below": 0.0
     },
     {
       "id": "seed-balanced",
       "parent_id": "baseline",
       "rationale": "Test whether seed-title overlap improves the first result.",
-      "weights": {"lexical": 0.6, "seed_overlap": 0.4}
+      "weights": {"lexical": 0.6, "seed_overlap": 0.4},
+      "abstain_below": 0.1
     }
   ]
 }
@@ -79,6 +84,16 @@ and positive-integer `provider_ranks`. See
 [`tests/test_ranking_experiment.py`](../tests/test_ranking_experiment.py) for a
 small synthetic example. That fixture verifies runner mechanics only; it is not
 quality evidence.
+
+Development selection prioritizes mean precision at the configured cutoff, then
+fewer false-positive returns on explicitly unanswerable cases, then fewer
+abstentions on explicitly answerable cases. A no-answer improvement can qualify
+as a research candidate at equal precision only when it does not increase
+answerable abstentions. Validation applies the frozen threshold and requires
+answerable abstentions not to increase versus baseline. Holdout registration
+predeclares an absolute limit for answerable abstentions; it defaults to zero.
+These are research gates for the offline evaluator. They do not change production
+search behavior or authorize automatic adoption.
 
 `experiment-rank` is intentionally a development evaluator, not a sandbox against a malicious
 or unrestricted process. Its output includes query-level development metrics and
